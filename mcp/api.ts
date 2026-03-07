@@ -5,15 +5,49 @@
  * 用于 MCP 服务器与后端通信
  */
 
-import { Todo, Tag, SubTask, UpdateSubTaskInput } from "../app/types/index.js";
+// 类型定义内联，避免复杂的路径解析
+type Todo = {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  tagIds: string[];
+  subTasks?: SubTask[];
+  artifact?: string;
+};
+
+type Tag = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+type SubTask = {
+  id: string;
+  todoId: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  order: number;
+  artifact?: string;
+};
+
+type UpdateSubTaskInput = {
+  text?: string;
+  completed?: boolean;
+  order?: number;
+  artifact?: string;
+};
 
 // MCP 服务配置 - 使用 4000 端口
 const MCP_API_PORT = process.env.MCP_API_PORT || "4000";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${MCP_API_PORT}`;
 
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
     this.name = "ApiError";
   }
 }

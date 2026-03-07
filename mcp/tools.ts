@@ -106,31 +106,33 @@ export const UpdateSubTaskArtifactSchema = z.object({
 
 export const GetStatsSchema = z.object({});
 
-// ==================== 工具名称枚举 ====================
+// ==================== 工具名称常量 ====================
 
-export enum ToolName {
-  GET_TODOS = "get_todos",
-  CREATE_TODO = "create_todo",
-  UPDATE_TODO = "update_todo",
-  DELETE_TODO = "delete_todo",
-  TOGGLE_TODO = "toggle_todo",
+export const ToolName = {
+  GET_TODOS: "get_todos",
+  CREATE_TODO: "create_todo",
+  UPDATE_TODO: "update_todo",
+  DELETE_TODO: "delete_todo",
+  TOGGLE_TODO: "toggle_todo",
   
-  GET_TAGS = "get_tags",
-  CREATE_TAG = "create_tag",
-  UPDATE_TAG = "update_tag",
-  DELETE_TAG = "delete_tag",
+  GET_TAGS: "get_tags",
+  CREATE_TAG: "create_tag",
+  UPDATE_TAG: "update_tag",
+  DELETE_TAG: "delete_tag",
   
-  GET_SUBTASKS = "get_subtasks",
-  CREATE_SUBTASK = "create_subtask",
-  UPDATE_SUBTASK = "update_subtask",
-  DELETE_SUBTASK = "delete_subtask",
-  TOGGLE_SUBTASK = "toggle_subtask",
+  GET_SUBTASKS: "get_subtasks",
+  CREATE_SUBTASK: "create_subtask",
+  UPDATE_SUBTASK: "update_subtask",
+  DELETE_SUBTASK: "delete_subtask",
+  TOGGLE_SUBTASK: "toggle_subtask",
   
-  UPDATE_TODO_ARTIFACT = "update_todo_artifact",
-  UPDATE_SUBTASK_ARTIFACT = "update_subtask_artifact",
+  UPDATE_TODO_ARTIFACT: "update_todo_artifact",
+  UPDATE_SUBTASK_ARTIFACT: "update_subtask_artifact",
   
-  GET_STATS = "get_stats",
-}
+  GET_STATS: "get_stats",
+} as const;
+
+export type ToolName = typeof ToolName[keyof typeof ToolName];
 
 // ==================== 工具定义类型 ====================
 

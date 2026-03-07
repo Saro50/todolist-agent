@@ -1,198 +1,454 @@
 /**
- * MCP HTTP 服务器
+ * MCP HTTP 服务器 - 纯 Express 实现
  * 
- * 提供基于 HTTP/SSE 的 MCP 服务，运行在 4001 端口
- * 允许 AI 客户端通过 HTTP 连接
+ * 不依赖 @modelcontextprotocol/sdk，使用原生 JSON-RPC 协议
  */
 
 import express from "express";
+import type { Request, Response } from "express";
 import cors from "cors";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { z } from "zod";
+import type { JSONRPCRequest, JSONRPCResponse, Tool, ToolResult } from "./types";
 import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import { toolDefinitions, ToolName } from "./tools.js";
-import { toolHandlers } from "./handlers.js";
+  handleGetTodos,
+  handleCreateTodo,
+  handleUpdateTodo,
+  handleDeleteTodo,
+  handleToggleTodo,
+  handleGetTags,
+  handleCreateTag,
+  handleUpdateTag,
+  handleDeleteTag,
+  handleGetSubTasks,
+  handleCreateSubTask,
+  handleUpdateSubTask,
+  handleDeleteSubTask,
+  handleToggleSubTask,
+  handleUpdateTodoArtifact,
+  handleUpdateSubTaskArtifact,
+  handleGetStats,
+} from "./handlers";
 
 const PORT = process.env.MCP_PORT || "4001";
 
-/**
- * 创建 MCP 服务器
- */
-export function createMCPServer(): Server {
-  // 转换工具定义为 MCP Tool 格式
-  const tools: Tool[] = toolDefinitions.map((def) => ({
-    name: def.name,
-    description: def.description,
-    inputSchema: zodToJsonSchema(def.schema),
-  }));
+// 服务器信息
+const SERVER_INFO = {
+  name: "todolist-mcp-server",
+  version: "1.0.0",
+};
 
-  // 创建服务器实例
-  const server = new Server(
-    {
-      name: "todolist-mcp-server",
-      version: "1.0.0",
-    },
-    {
-      capabilities: {
-        tools: {},
+// 协议版本
+const PROTOCOL_VERSION = "2024-11-05";
+
+// 工具定义
+const tools: Tool[] = [
+  {
+    name: "get_todos",
+    description: "获取任务列表，支持按状态和标签筛选",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["all", "active", "completed"], description: "筛选状态" },
+        tagId: { type: "string", description: "按标签ID筛选" },
+        includeSubTasks: { type: "boolean", description: "是否包含子任务" },
       },
-    }
-  );
+    },
+  },
+  {
+    name: "create_todo",
+    description: "创建新任务",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "任务内容" },
+        tagIds: { type: "array", items: { type: "string" }, description: "关联的标签ID列表" },
+        artifact: { type: "string", description: "产物(Markdown格式)" },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "update_todo",
+    description: "更新任务信息（内容、状态、标签、产物）",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "任务ID" },
+        text: { type: "string", description: "新的任务内容" },
+        completed: { type: "boolean", description: "完成状态" },
+        tagIds: { type: "array", items: { type: "string" }, description: "标签ID列表" },
+        artifact: { type: "string", description: "Markdown格式的任务产物/报告" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_todo",
+    description: "删除任务及其所有子任务",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "要删除的任务ID" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "toggle_todo",
+    description: "切换任务完成状态",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "任务ID" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "get_tags",
+    description: "获取所有标签",
+    inputSchema: { type: "object" },
+  },
+  {
+    name: "create_tag",
+    description: "创建新标签",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "标签名称" },
+        color: { type: "string", enum: ["emerald", "blue", "violet", "rose", "amber", "cyan"], description: "标签颜色" },
+      },
+      required: ["name", "color"],
+    },
+  },
+  {
+    name: "update_tag",
+    description: "更新标签信息",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "标签ID" },
+        name: { type: "string", description: "新标签名称" },
+        color: { type: "string", enum: ["emerald", "blue", "violet", "rose", "amber", "cyan"], description: "新标签颜色" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_tag",
+    description: "删除标签",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "要删除的标签ID" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "get_subtasks",
+    description: "获取指定任务的所有子任务",
+    inputSchema: {
+      type: "object",
+      properties: {
+        todoId: { type: "string", description: "父任务ID" },
+      },
+      required: ["todoId"],
+    },
+  },
+  {
+    name: "create_subtask",
+    description: "为指定任务创建子任务",
+    inputSchema: {
+      type: "object",
+      properties: {
+        todoId: { type: "string", description: "父任务ID" },
+        text: { type: "string", description: "子任务内容" },
+      },
+      required: ["todoId", "text"],
+    },
+  },
+  {
+    name: "update_subtask",
+    description: "更新子任务内容",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "子任务ID" },
+        text: { type: "string", description: "新的子任务内容" },
+        completed: { type: "boolean", description: "完成状态" },
+        artifact: { type: "string", description: "产物(Markdown格式)" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_subtask",
+    description: "删除子任务",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "要删除的子任务ID" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "toggle_subtask",
+    description: "切换子任务完成状态",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "子任务ID" },
+        completed: { type: "boolean", description: "完成状态" },
+      },
+      required: ["id", "completed"],
+    },
+  },
+  {
+    name: "update_todo_artifact",
+    description: "更新任务的 Markdown 产物/报告",
+    inputSchema: {
+      type: "object",
+      properties: {
+        todoId: { type: "string", description: "任务ID" },
+        artifact: { type: "string", description: "Markdown格式的产物内容" },
+      },
+      required: ["todoId", "artifact"],
+    },
+  },
+  {
+    name: "update_subtask_artifact",
+    description: "更新子任务的 Markdown 产物/报告",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subTaskId: { type: "string", description: "子任务ID" },
+        artifact: { type: "string", description: "Markdown格式的产物内容" },
+      },
+      required: ["subTaskId", "artifact"],
+    },
+  },
+  {
+    name: "get_stats",
+    description: "获取任务统计信息",
+    inputSchema: { type: "object" },
+  },
+];
 
-  // 处理工具列表请求
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools };
-  });
+// 工具处理器映射
+type ToolHandler = (args: unknown) => Promise<ToolResult>;
 
-  // 处理工具调用请求
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+const toolHandlers: Record<string, ToolHandler> = {
+  get_todos: handleGetTodos,
+  create_todo: handleCreateTodo,
+  update_todo: handleUpdateTodo,
+  delete_todo: handleDeleteTodo,
+  toggle_todo: handleToggleTodo,
+  get_tags: handleGetTags,
+  create_tag: handleCreateTag,
+  update_tag: handleUpdateTag,
+  delete_tag: handleDeleteTag,
+  get_subtasks: handleGetSubTasks,
+  create_subtask: handleCreateSubTask,
+  update_subtask: handleUpdateSubTask,
+  delete_subtask: handleDeleteSubTask,
+  toggle_subtask: handleToggleSubTask,
+  update_todo_artifact: handleUpdateTodoArtifact,
+  update_subtask_artifact: handleUpdateSubTaskArtifact,
+  get_stats: handleGetStats,
+};
 
-    const handler = toolHandlers[name as ToolName];
-    if (!handler) {
-      return {
-        content: [{ type: "text", text: `❌ 未知工具: ${name}` }],
-        isError: true,
-      };
-    }
-
-    return handler(args);
-  });
-
-  return server;
+/**
+ * 创建 JSON-RPC 成功响应
+ */
+function createResult(id: string | number | undefined, result: unknown): JSONRPCResponse {
+  return {
+    jsonrpc: "2.0",
+    id,
+    result,
+  };
 }
 
 /**
- * 启动 MCP HTTP 服务器
+ * 创建 JSON-RPC 错误响应
  */
-export async function startMCPHTTPServer(): Promise<void> {
+function createError(
+  id: string | number | undefined,
+  code: number,
+  message: string,
+  data?: unknown
+): JSONRPCResponse {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code,
+      message,
+      data,
+    },
+  };
+}
+
+/**
+ * 处理 JSON-RPC 请求
+ */
+async function handleRequest(req: JSONRPCRequest): Promise<JSONRPCResponse> {
+  const { id, method, params } = req;
+
+  try {
+    switch (method) {
+      case "initialize": {
+        return createResult(id, {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: SERVER_INFO,
+        });
+      }
+
+      case "initialized": {
+        // 初始化完成通知，无需响应
+        return createResult(id, {});
+      }
+
+      case "tools/list": {
+        return createResult(id, { tools });
+      }
+
+      case "tools/call": {
+        const { name, arguments: args } = params as { name: string; arguments?: Record<string, unknown> };
+        const handler = toolHandlers[name];
+        
+        if (!handler) {
+          return createError(id, -32602, `未知工具: ${name}`);
+        }
+
+        const result = await handler(args);
+        return createResult(id, result);
+      }
+
+      default: {
+        return createError(id, -32601, `未知方法: ${method}`);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "未知错误";
+    return createError(id, -32603, `内部错误: ${message}`);
+  }
+}
+
+/**
+ * 启动 HTTP/SSE 模式服务器
+ */
+export async function startHTTPServer(): Promise<void> {
   const app = express();
   
   app.use(cors());
   app.use(express.json());
 
-  const transports: Map<string, SSEServerTransport> = new Map();
-
   // SSE 端点
-  app.get("/sse", async (req, res) => {
-    const transport = new SSEServerTransport("/messages", res);
-    const sessionId = transport.sessionId;
+  app.get("/sse", async (req: Request, res: Response) => {
+    const sessionId = Math.random().toString(36).substring(2, 15);
     
-    transports.set(sessionId, transport);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
     
     console.log(`✅ MCP 客户端已连接: ${sessionId}`);
 
-    const server = createMCPServer();
-    await server.connect(transport);
+    // 发送初始端点信息
+    res.write(`event: endpoint\n`);
+    res.write(`data: /messages?sessionId=${sessionId}\n\n`);
+
+    // 保持连接
+    const keepAlive = setInterval(() => {
+      res.write(`:keep-alive\n\n`);
+    }, 30000);
 
     // 客户端断开连接
-    res.on("close", () => {
+    req.on("close", () => {
+      clearInterval(keepAlive);
       console.log(`👋 MCP 客户端已断开: ${sessionId}`);
-      transports.delete(sessionId);
     });
   });
 
-  // 消息端点
-  app.post("/messages", async (req, res) => {
-    const sessionId = req.query.sessionId as string;
-    const transport = transports.get(sessionId);
+  // 消息端点 - JSON-RPC over HTTP
+  app.post("/messages", async (req: Request, res: Response) => {
+    const request = req.body as JSONRPCRequest;
     
-    if (transport) {
-      await transport.handlePostMessage(req, res, req.body);
-    } else {
-      res.status(400).json({ error: "无效的 sessionId" });
+    if (!request || request.jsonrpc !== "2.0") {
+      return res.status(400).json(createError(undefined, -32600, "无效的 JSON-RPC 请求"));
     }
+
+    const response = await handleRequest(request);
+    res.json(response);
+  });
+
+  // JSON-RPC 端点（简化版，不通过 SSE）
+  app.post("/rpc", async (req: Request, res: Response) => {
+    const request = req.body as JSONRPCRequest;
+    
+    if (!request || request.jsonrpc !== "2.0") {
+      return res.status(400).json(createError(undefined, -32600, "无效的 JSON-RPC 请求"));
+    }
+
+    const response = await handleRequest(request);
+    res.json(response);
   });
 
   // 健康检查
-  app.get("/health", (req, res) => {
+  app.get("/health", (req: Request, res: Response) => {
     res.json({ 
       status: "ok", 
-      service: "todolist-mcp-server",
-      version: "1.0.0",
-      clients: transports.size,
+      service: SERVER_INFO.name,
+      version: SERVER_INFO.version,
+      protocolVersion: PROTOCOL_VERSION,
     });
   });
 
   // 工具列表（REST API）
-  app.get("/tools", (req, res) => {
-    res.json({
-      tools: toolDefinitions.map((def) => ({
-        name: def.name,
-        description: def.description,
-      })),
-    });
+  app.get("/tools", (req: Request, res: Response) => {
+    res.json({ tools });
   });
 
   app.listen(PORT, () => {
     console.log("🚀 TodoList MCP HTTP Server 已启动");
     console.log(`   Port: ${PORT}`);
-    console.log(`   SSE:  http://localhost:${PORT}/sse`);
+    console.log(`   RPC:  http://localhost:${PORT}/rpc`);
     console.log(`   Health: http://localhost:${PORT}/health`);
     console.log(`   Tools: http://localhost:${PORT}/tools`);
-    console.log(`   可用工具: ${toolDefinitions.length} 个`);
+    console.log(`   SSE:  http://localhost:${PORT}/sse`);
+    console.log(`   可用工具: ${tools.length} 个`);
   });
 }
 
 /**
- * 将 Zod Schema 转换为 JSON Schema
+ * 启动 STDIO 模式服务器
  */
-function zodToJsonSchema(zodSchema: any): any {
-  const schema = zodSchema._def || zodSchema;
+export async function startStdioServer(): Promise<void> {
+  const readline = await import("readline");
   
-  if (schema.typeName === "ZodObject") {
-    const properties: Record<string, any> = {};
-    const required: string[] = [];
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
 
-    for (const [key, value] of Object.entries(schema.shape())) {
-      const propSchema = zodToJsonSchema(value as any);
-      properties[key] = propSchema;
+  console.error(`${SERVER_INFO.name} v${SERVER_INFO.version} running on stdio`);
+
+  for await (const line of rl) {
+    try {
+      const request = JSON.parse(line) as JSONRPCRequest;
+      const response = await handleRequest(request);
       
-      if (!(value as any).isOptional || !(value as any).isOptional()) {
-        required.push(key);
+      // 只有有 id 的请求才需要响应（通知不需要）
+      if (request.id !== undefined) {
+        console.log(JSON.stringify(response));
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "解析错误";
+      const errorResponse = createError(undefined, -32700, `解析错误: ${message}`);
+      console.log(JSON.stringify(errorResponse));
     }
-
-    return {
-      type: "object",
-      properties,
-      required,
-    };
   }
-
-  if (schema.typeName === "ZodString") {
-    return { type: "string" };
-  }
-
-  if (schema.typeName === "ZodNumber") {
-    return { type: "number" };
-  }
-
-  if (schema.typeName === "ZodBoolean") {
-    return { type: "boolean" };
-  }
-
-  if (schema.typeName === "ZodArray") {
-    return {
-      type: "array",
-      items: zodToJsonSchema(schema.type),
-    };
-  }
-
-  if (schema.typeName === "ZodEnum") {
-    return {
-      type: "string",
-      enum: schema.values,
-    };
-  }
-
-  if (schema.typeName === "ZodOptional") {
-    return zodToJsonSchema(schema.innerType);
-  }
-
-  return { type: "object" };
 }

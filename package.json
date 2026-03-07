@@ -5,22 +5,21 @@
   "scripts": {
     "dev": "node scripts/start-dev.js",
     "dev:web": "next dev -p 4000",
-    "dev:mcp": "MCP_API_PORT=4000 MCP_PORT=4001 ts-node --esm mcp/index-http.ts",
+    "dev:mcp": "MCP_API_PORT=4000 MCP_PORT=4001 ts-node -P tsconfig.mcp.json mcp/index-http.ts",
     "build": "next build",
     "start": "next start -p 4000",
     "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "mcp": "MCP_API_PORT=4000 ts-node --esm mcp/index.ts",
-    "mcp:http": "MCP_API_PORT=4000 MCP_PORT=4001 ts-node --esm mcp/index-http.ts",
-    "mcp:build": "tsc -p tsconfig.mcp.json"
+    "mcp": "MCP_API_PORT=4000 ts-node -P tsconfig.mcp.json mcp/index.ts",
+    "mcp:http": "MCP_API_PORT=4000 MCP_PORT=4001 ts-node --esm mcp/index-http.ts"
   },
   "bin": {
     "todolist-mcp": "./dist/mcp/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
@@ -29,6 +28,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "^3.5.0",
+    "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

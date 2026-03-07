@@ -5,8 +5,33 @@
  * 复用现有的 API 客户端与后端通信
  */
 
-import { api } from "./api.js";
-import { Todo, Tag, SubTask } from "@/app/types";
+import { api } from "./api";
+// 类型定义内联
+type Todo = {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  tagIds: string[];
+  subTasks?: SubTask[];
+  artifact?: string;
+};
+
+type Tag = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+type SubTask = {
+  id: string;
+  todoId: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  order: number;
+  artifact?: string;
+};
 import {
   ToolName,
   GetTodosSchema,
@@ -24,12 +49,16 @@ import {
   ToggleSubTaskSchema,
   UpdateTodoArtifactSchema,
   UpdateSubTaskArtifactSchema,
-} from "./tools.js";
+} from "./tools";
 import { z } from "zod";
 
 // ==================== 工具调用结果 ====================
 
-import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+// CallToolResult 类型 - 从 MCP SDK 提取
+interface CallToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+}
 
 export type ToolResult = CallToolResult;
 
@@ -81,9 +110,9 @@ function handleError(error: unknown): ToolResult {
 
 // ==================== Todo 处理器 ====================
 
-async function handleGetTodos(args: unknown): Promise<ToolResult> {
+export async function handleGetTodos(args: unknown): Promise<ToolResult> {
   try {
-    const params = GetTodosSchema.parse(args);
+    const params = GetTodosSchema.parse(args || {});
     
     let todos: Todo[];
     if (params.status === "active") {
@@ -119,9 +148,9 @@ async function handleGetTodos(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleCreateTodo(args: unknown): Promise<ToolResult> {
+export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
   try {
-    const params = CreateTodoSchema.parse(args);
+    const params = CreateTodoSchema.parse(args || {});
     const todo = await api.todos.create({
       text: params.text,
       tagIds: params.tagIds || [],
@@ -136,9 +165,9 @@ async function handleCreateTodo(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleUpdateTodo(args: unknown): Promise<ToolResult> {
+export async function handleUpdateTodo(args: unknown): Promise<ToolResult> {
   try {
-    const params = UpdateTodoSchema.parse(args);
+    const params = UpdateTodoSchema.parse(args || {});
     const { id, ...data } = params;
     
     const todo = await api.todos.update(id, data);
@@ -151,9 +180,9 @@ async function handleUpdateTodo(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleDeleteTodo(args: unknown): Promise<ToolResult> {
+export async function handleDeleteTodo(args: unknown): Promise<ToolResult> {
   try {
-    const params = DeleteTodoSchema.parse(args);
+    const params = DeleteTodoSchema.parse(args || {});
     await api.todos.delete(params.id);
     
     return {
@@ -164,9 +193,9 @@ async function handleDeleteTodo(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleToggleTodo(args: unknown): Promise<ToolResult> {
+export async function handleToggleTodo(args: unknown): Promise<ToolResult> {
   try {
-    const params = ToggleTodoSchema.parse(args);
+    const params = ToggleTodoSchema.parse(args || {});
     const todo = await api.todos.getById(params.id);
     
     if (!todo) {
@@ -186,7 +215,7 @@ async function handleToggleTodo(args: unknown): Promise<ToolResult> {
 
 // ==================== 标签处理器 ====================
 
-async function handleGetTags(): Promise<ToolResult> {
+export async function handleGetTags(): Promise<ToolResult> {
   try {
     const tags = await api.tags.getAll();
     
@@ -205,9 +234,9 @@ async function handleGetTags(): Promise<ToolResult> {
   }
 }
 
-async function handleCreateTag(args: unknown): Promise<ToolResult> {
+export async function handleCreateTag(args: unknown): Promise<ToolResult> {
   try {
-    const params = CreateTagSchema.parse(args);
+    const params = CreateTagSchema.parse(args || {});
     const tag = await api.tags.create(params);
     
     return {
@@ -218,9 +247,9 @@ async function handleCreateTag(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleUpdateTag(args: unknown): Promise<ToolResult> {
+export async function handleUpdateTag(args: unknown): Promise<ToolResult> {
   try {
-    const params = UpdateTagSchema.parse(args);
+    const params = UpdateTagSchema.parse(args || {});
     const { id, ...data } = params;
     
     const tag = await api.tags.update(id, data);
@@ -233,9 +262,9 @@ async function handleUpdateTag(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleDeleteTag(args: unknown): Promise<ToolResult> {
+export async function handleDeleteTag(args: unknown): Promise<ToolResult> {
   try {
-    const params = DeleteTagSchema.parse(args);
+    const params = DeleteTagSchema.parse(args || {});
     await api.tags.delete(params.id);
     
     return {
@@ -248,9 +277,9 @@ async function handleDeleteTag(args: unknown): Promise<ToolResult> {
 
 // ==================== 子任务处理器 ====================
 
-async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
+export async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
   try {
-    const params = GetSubTasksSchema.parse(args);
+    const params = GetSubTasksSchema.parse(args || {});
     const subTasks = await api.subTasks.getByTodoId(params.todoId);
     
     if (subTasks.length === 0) {
@@ -268,9 +297,9 @@ async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleCreateSubTask(args: unknown): Promise<ToolResult> {
+export async function handleCreateSubTask(args: unknown): Promise<ToolResult> {
   try {
-    const params = CreateSubTaskSchema.parse(args);
+    const params = CreateSubTaskSchema.parse(args || {});
     const subTask = await api.subTasks.create(params.todoId, params.text);
     
     return {
@@ -281,9 +310,9 @@ async function handleCreateSubTask(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleUpdateSubTask(args: unknown): Promise<ToolResult> {
+export async function handleUpdateSubTask(args: unknown): Promise<ToolResult> {
   try {
-    const params = UpdateSubTaskSchema.parse(args);
+    const params = UpdateSubTaskSchema.parse(args || {});
     const { id, ...data } = params;
     
     const subTask = await api.subTasks.update(id, data);
@@ -296,9 +325,9 @@ async function handleUpdateSubTask(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleDeleteSubTask(args: unknown): Promise<ToolResult> {
+export async function handleDeleteSubTask(args: unknown): Promise<ToolResult> {
   try {
-    const params = DeleteSubTaskSchema.parse(args);
+    const params = DeleteSubTaskSchema.parse(args || {});
     await api.subTasks.delete(params.id);
     
     return {
@@ -309,9 +338,9 @@ async function handleDeleteSubTask(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleToggleSubTask(args: unknown): Promise<ToolResult> {
+export async function handleToggleSubTask(args: unknown): Promise<ToolResult> {
   try {
-    const params = ToggleSubTaskSchema.parse(args);
+    const params = ToggleSubTaskSchema.parse(args || {});
     const subTask = await api.subTasks.update(params.id, { completed: params.completed });
     
     return {
@@ -324,9 +353,9 @@ async function handleToggleSubTask(args: unknown): Promise<ToolResult> {
 
 // ==================== 产物处理器 ====================
 
-async function handleUpdateTodoArtifact(args: unknown): Promise<ToolResult> {
+export async function handleUpdateTodoArtifact(args: unknown): Promise<ToolResult> {
   try {
-    const params = UpdateTodoArtifactSchema.parse(args);
+    const params = UpdateTodoArtifactSchema.parse(args || {});
     const todo = await api.todos.update(params.todoId, { artifact: params.artifact });
     
     return {
@@ -337,9 +366,9 @@ async function handleUpdateTodoArtifact(args: unknown): Promise<ToolResult> {
   }
 }
 
-async function handleUpdateSubTaskArtifact(args: unknown): Promise<ToolResult> {
+export async function handleUpdateSubTaskArtifact(args: unknown): Promise<ToolResult> {
   try {
-    const params = UpdateSubTaskArtifactSchema.parse(args);
+    const params = UpdateSubTaskArtifactSchema.parse(args || {});
     const subTask = await api.subTasks.update(params.subTaskId, { artifact: params.artifact });
     
     return {
@@ -352,7 +381,7 @@ async function handleUpdateSubTaskArtifact(args: unknown): Promise<ToolResult> {
 
 // ==================== 统计处理器 ====================
 
-async function handleGetStats(): Promise<ToolResult> {
+export async function handleGetStats(): Promise<ToolResult> {
   try {
     const [todos, tags] = await Promise.all([
       api.todos.getAll(),

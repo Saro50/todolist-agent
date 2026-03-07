@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * MCP 服务器入口
+ * MCP STDIO 服务器入口
  * 
- * 运行方式:
- * - 开发: npx ts-node mcp/index.ts
- * - 生产: node dist/mcp/index.js
+ * 纯 Node.js 实现，不依赖 @modelcontextprotocol/sdk
  */
 
-import { startMCPServer } from "./server";
+import { startStdioServer } from "./server-http";
 
-// 启动服务器
-startMCPServer().catch((error) => {
-  console.error("❌ MCP Server 启动失败:", error);
+startStdioServer().catch((error) => {
+  console.error("❌ MCP STDIO Server 启动失败:", error);
   process.exit(1);
 });
