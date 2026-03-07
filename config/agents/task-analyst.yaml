@@ -1,0 +1,41 @@
+# Task Analyst Agent
+# Kimi CLI Agent 配置文件
+# 文档: https://moonshotai.github.io/kimi-cli/zh/customization/agents.html
+
+version: 1
+
+agent:
+  # Agent 名称
+  name: task-analyst
+  
+  # 继承默认 Agent（继承默认工具集）
+  extend: default
+  
+  # 系统提示词文件路径（相对于本文件）
+  system_prompt_path: ./task-analyst.md
+  
+  # 传递给系统提示词的自定义参数
+  system_prompt_args:
+    AGENT_NAME: "任务分析拆分专家"
+    AGENT_VERSION: "1.0.0"
+    TASK_TYPE: "代码类任务"
+  
+  # 工具列表（继承 default 的基础上可以排除某些工具）
+  # default 包含: Task, AskUserQuestion, SetTodoList, Shell, ReadFile, ReadMediaFile, 
+  #               Glob, Grep, WriteFile, StrReplaceFile, SearchWeb, FetchURL
+  exclude_tools:
+    - "kimi_cli.tools.web:SearchWeb"    # 任务分析不需要网络搜索
+    - "kimi_cli.tools.web:FetchURL"     # 任务分析不需要抓取网页
+    - "kimi_cli.tools.file:ReadMediaFile"  # 不需要读取媒体文件
+  
+  # 子 Agent 定义
+  # subagents:
+  #   # 子 Agent：探索项目结构
+  #   explorer:
+  #     path: ./subagents/explorer.yaml
+  #     description: "探索项目结构和文件"
+    
+  #   # 子 Agent：验证验收标准
+  #   validator:
+  #     path: ./subagents/validator.yaml
+  #     description: "验证任务验收标准是否可测试"

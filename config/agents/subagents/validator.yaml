@@ -1,0 +1,15 @@
+# Validator Subagent
+# 用于验证任务验收标准是否可测试的子 Agent
+
+version: 1
+
+agent:
+  name: validator
+  
+  extend: default
+  
+  system_prompt_path: ./validator.md
+  
+  # 排除 Task 工具，避免嵌套调用
+  exclude_tools:
+    - "kimi_cli.tools.multiagent:Task"

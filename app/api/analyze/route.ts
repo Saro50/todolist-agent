@@ -1,18 +1,46 @@
 /**
  * 任务分析 API 路由
  * 
- * 调用 task-analyzer Agent 分析任务并拆分为子任务
+ * 使用 Kimi CLI Agent 模式 + Print 模式调用 task-analyst
+ * Agent 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/agents.html
+ * Print 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/print-mode.html
+ * 
+ * Agent 文件格式（version: 1）：
+ * agent:
+ *   name: agent名称
+ *   extend: default              # 继承内置 default Agent
+ *   system_prompt_path: ./prompt.md
+ *   system_prompt_args:          # 自定义参数（提示词中用 ${VAR} 引用）
+ *     MY_VAR: "值"
+ *   subagents:                   # 子 Agent 定义
+ *     explorer:
+ *       path: ./sub.yaml
+ * 
+ * Print 模式特点：
+ * - 非交互：执行完指令后自动退出
+ * - 自动审批：隐式启用 --yolo 模式，所有操作自动批准
+ * - 文本输出：AI 的回复输出到 stdout
+ * - --final-message-only：仅输出最终消息，跳过工具调用过程
+ * 
+ * 内置变量（在提示词中用 ${VAR} 引用）：
+ * - ${KIMI_NOW}：当前时间（ISO 格式）
+ * - ${KIMI_WORK_DIR}：工作目录路径
+ * - ${KIMI_WORK_DIR_LS}：工作目录文件列表
+ * - ${KIMI_AGENTS_MD}：AGENTS.md 文件内容
+ * - ${KIMI_SKILLS}：加载的 Skills 列表
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { execSync } from "child_process";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
+
+// Agent 配置文件路径
+const AGENT_FILE = "./config/agents/task-analyst.yaml";
 
 export async function POST(request: NextRequest) {
   try {
-    const { taskText, taskId } = await request.json();
+    const { taskText, taskId, context } = await request.json();
 
     if (!taskText || typeof taskText !== "string") {
       return NextResponse.json(
@@ -21,102 +49,161 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 创建临时目录
-    const tempDir = join(tmpdir(), "todolist-analyzer");
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
+    // 检查 Agent 文件是否存在
+    const agentPath = join(process.cwd(), AGENT_FILE);
+    if (!existsSync(agentPath)) {
+      console.warn(`Agent 文件不存在: ${agentPath}`);
     }
 
-    // 创建系统提示词文件
-    const promptContent = `你是一个专业的任务分析专家。你的职责是：
+    /**
+     * 构建 kimi 命令
+     * 
+     * Agent + Print 模式组合：
+     *   kimi --agent-file ./config/agents/task-analyst.yaml \
+     *        --print \
+     *        --final-message-only \
+     *        -p "任务描述"
+     * 
+     * 说明：
+     * - --agent-file: 加载自定义 Agent YAML 配置
+     * - --print: 启用 Print 模式
+     * - --final-message-only: 仅输出最终消息
+     * - -p: 传入用户指令
+     * 
+     * Agent 配置中的 system_prompt_path 指向的提示词文件
+     * 可以使用 ${KIMI_NOW}, ${KIMI_WORK_DIR} 等内置变量
+     */
+    const args: string[] = [
+      "--print",                    // 启用 Print 模式
+      "--final-message-only",       // 仅输出最终消息，跳过工具调用过程
+      "-p",                         // 传入用户指令
+      `"${taskText.replace(/"/g, '\\"')}"`,
+    ];
 
-1. 分析用户输入的任务描述，评估其复杂度
-2. 识别任务的关键组成部分和依赖关系
-3. 如果任务较为复杂（需要多个步骤或涉及多个领域），将其拆分为清晰的子任务
-4. 为每个子任务定义：
-   - 明确的标题和描述
-   - 优先级（high/medium/low）
-   - 预估完成时间
-   - 依赖关系（哪些子任务需要在其他子任务之前完成）
-
-分析原则：
-- 保持子任务的独立性和可执行性
-- 确保子任务的粒度适中（通常2-4小时可完成）
-- 识别潜在的风险和阻塞点
-- 提供清晰的执行顺序建议
-
-输出格式要求（必须是有效的 JSON）：
-{
-  "summary": "任务概述",
-  "complexity": "simple|medium|complex",
-  "subTasks": [
-    {
-      "title": "子任务标题",
-      "description": "详细描述",
-      "priority": "high|medium|low",
-      "estimatedTime": "2h",
-      "dependencies": []
+    // 如果 Agent 文件存在，使用 --agent-file
+    if (existsSync(agentPath)) {
+      args.unshift("--agent-file", AGENT_FILE);
     }
-  ],
-  "executionOrder": [0, 1, 2],
-  "risks": ["风险1", "风险2"]
-}`;
 
-    const promptFile = join(tempDir, `prompt-${taskId}.txt`);
-    writeFileSync(promptFile, promptContent, "utf-8");
+    const command = `kimi ${args.join(" ")}`;
 
-    // 构建 kimi 命令
-    const taskInput = `请分析以下任务并提供详细的子任务拆分方案：\n\n${taskText}`;
-    const command = `kimi --print --no-stream --system-prompt-file "${promptFile}" "${taskInput.replace(/"/g, '\\"')}"`;
+    console.log(`[TaskAnalyzer] 分析任务: ${taskId || "unknown"}`);
+    console.log(`[TaskAnalyzer] 命令: ${command}`);
 
     // 执行命令
     const result = execSync(command, {
       encoding: "utf-8",
-      timeout: 60000,
+      timeout: 120000,  // 2分钟超时，任务分析可能需要较长时间
       cwd: process.cwd(),
       env: {
         ...process.env,
         AGENT_ID: "task-analyzer",
         AGENT_ROLE: "analyzer",
+        AGENT_FILE: AGENT_FILE,
+        // 传递上下文信息
+        TASK_CONTEXT: context ? JSON.stringify(context) : "",
       },
     });
 
-    // 解析结果
+    // 解析结果 - 尝试提取 JSON 格式的任务列表
     let analysisResult;
     try {
-      // 尝试从结果中提取 JSON
-      const jsonMatch = result.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analysisResult = JSON.parse(jsonMatch[0]);
-      } else {
+      // 先尝试直接解析整个输出为 JSON
+      analysisResult = JSON.parse(result);
+    } catch {
+      // 尝试从 markdown 中提取 JSON 代码块
+      const jsonCodeBlockMatch = result.match(/```json\n([\s\S]*?)\n```/);
+      if (jsonCodeBlockMatch) {
+        try {
+          analysisResult = JSON.parse(jsonCodeBlockMatch[1]);
+        } catch {
+          analysisResult = null;
+        }
+      }
+      
+      // 尝试从文本中提取 JSON 对象
+      if (!analysisResult) {
+        const jsonMatch = result.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            analysisResult = JSON.parse(jsonMatch[0]);
+          } catch {
+            analysisResult = null;
+          }
+        }
+      }
+      
+      // 如果都无法解析，将原始文本作为结果
+      if (!analysisResult) {
         analysisResult = {
-          summary: result.substring(0, 200),
+          summary: "AI 分析结果",
           complexity: "medium",
+          analysis_text: result,
           subTasks: [],
           executionOrder: [],
           risks: [],
         };
       }
-    } catch {
-      analysisResult = {
-        summary: result.substring(0, 500),
-        complexity: "medium",
-        subTasks: [],
-        executionOrder: [],
-        risks: [],
-      };
     }
 
     return NextResponse.json({
       success: true,
       result: analysisResult,
       raw: result,
+      meta: {
+        taskId,
+        agentFile: AGENT_FILE,
+        timestamp: new Date().toISOString(),
+      },
     });
   } catch (error) {
-    console.error("任务分析失败:", error);
+    console.error("[TaskAnalyzer] 任务分析失败:", error);
     return NextResponse.json(
       {
         error: "任务分析失败",
+        message: error instanceof Error ? error.message : "未知错误",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * 获取 Agent 配置和提示词内容（用于前端展示）
+ */
+export async function GET() {
+  try {
+    // 读取 Agent 配置文件
+    const agentPath = join(process.cwd(), AGENT_FILE);
+    const promptPath = join(process.cwd(), "./config/agents/task-analyst.md");
+    
+    if (!existsSync(agentPath)) {
+      return NextResponse.json(
+        { error: "Agent 配置文件不存在" },
+        { status: 404 }
+      );
+    }
+    
+    const agentContent = readFileSync(agentPath, "utf-8");
+    const promptContent = existsSync(promptPath) 
+      ? readFileSync(promptPath, "utf-8") 
+      : null;
+    
+    return NextResponse.json({
+      success: true,
+      agent: {
+        content: agentContent,
+        path: AGENT_FILE,
+      },
+      prompt: promptContent ? {
+        content: promptContent,
+        path: "./config/agents/task-analyst.md",
+      } : null,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "读取 Agent 配置失败",
         message: error instanceof Error ? error.message : "未知错误",
       },
       { status: 500 }

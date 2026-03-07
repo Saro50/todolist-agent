@@ -1,0 +1,17 @@
+# Explorer Subagent
+# 用于探索项目结构和文件的子 Agent
+
+version: 1
+
+agent:
+  name: explorer
+  
+  # 继承父 Agent（task-analyst.yaml 的父是 default）
+  extend: default
+  
+  # 系统提示词
+  system_prompt_path: ./explorer.md
+  
+  # 排除 Task 工具，避免嵌套调用
+  exclude_tools:
+    - "kimi_cli.tools.multiagent:Task"

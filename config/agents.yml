@@ -1,5 +1,7 @@
 # Agent 配置文件
 # 定义三个核心 Agent 的职责、提示词和启动方式
+# Kimi CLI Agent 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/agents.html
+# Kimi CLI Print 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/print-mode.html
 
 version: "1.0.0"
 description: "TodoList 任务处理 Agent 配置"
@@ -14,100 +16,83 @@ agents:
     enabled: true
     priority: 1
     
-    # 启动配置：支持多种启动方式（stdio/http/sse/cli）
+    # 启动配置：使用 Kimi CLI Agent 模式 + Print 模式
+    # Agent 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/agents.html
+    # Print 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/print-mode.html
     launch_config:
       # 传输方式: stdio | http | sse | cli
-      # - stdio: 标准输入输出（本地子进程）
-      # - http: HTTP API 模式
-      # - sse: Server-Sent Events 模式
-      # - cli: 命令行工具模式（单次执行，如 kimi --print）
       transport: "cli"
       
-      # ==================== CLI 模式配置（如 kimi CLI）====================
-      # 启动命令，可以是系统命令或完整路径
+      # 启动命令
       command: "kimi"
       
-      # 命令参数模板
-      # 支持变量替换: {{task}}, {{context}}, {{prompt}}
+      # Agent + Print 模式参数：
+      # --agent-file <file>        : 加载自定义 Agent YAML 配置文件
+      # --print                    : 启用 Print 模式（非交互、自动审批）
+      # --final-message-only       : 仅输出最终消息，跳过工具调用过程
+      # -p "<prompt>"              : 传入用户指令
+      #
+      # Agent 文件结构（version: 1）：
+      # agent:
+      #   name: agent名称
+      #   extend: default           # 继承内置 default Agent
+      #   system_prompt_path: ./prompt.md
+      #   system_prompt_args:       # 自定义参数（在提示词中用 ${VAR} 引用）
+      #     MY_VAR: "值"
+      #   subagents:                # 子 Agent 定义
+      #     explorer:
+      #       path: ./sub.yaml
+      #
+      # 内置变量（在提示词中用 ${VAR} 引用）：
+      # ${KIMI_NOW}                : 当前时间（ISO 格式）
+      # ${KIMI_WORK_DIR}           : 工作目录路径
+      # ${KIMI_WORK_DIR_LS}        : 工作目录文件列表
+      # ${KIMI_AGENTS_MD}          : AGENTS.md 文件内容
+      # ${KIMI_SKILLS}             : 加载的 Skills 列表
       args:
-        - "--print"                    # 单行输出模式
-        - "--no-stream"                # 非流式输出
-        - "--system-prompt-file"       # 系统提示词文件
-        - "{{prompt_file}}"            # 提示词文件路径（动态替换）
-        - "{{task}}"                   # 任务描述（动态替换）
+        - "--agent-file"                    # 加载自定义 Agent 配置
+        - "./config/agents/task-analyst.yaml"
+        - "--print"                         # 启用 Print 模式
+        - "--final-message-only"            # 仅输出最终消息
+        - "-p"                              # 用户指令
+        - "{{user_input}}"
       
-      # 参数模板（用于动态生成参数）
+      # 参数模板（运行时替换）
       arg_templates:
-        task: "分析以下任务并提供详细的子任务拆分方案：\n{{input}}"
-        prompt_file: "./prompts/analyzer.txt"
-        context: "{{parent_task_context}}"
+        user_input: "{{input}}"
       
-      # 工作目录
       cwd: "."
       
-      # 环境变量
       env:
         AGENT_ID: "task-analyzer"
         AGENT_ROLE: "analyzer"
-        KIMI_MODEL: "kimi-latest"
-        LOG_LEVEL: "info"
+        AGENT_FILE: "./config/agents/task-analyst.yaml"
+        # Kimi CLI 会自动读取 MOONSHOT_API_KEY 环境变量
       
-      # 启动超时（秒）
-      # CLI 模式下这是单次执行的超时时间
-      timeout: 60
+      timeout: 120
       
-      # CLI 模式特有配置
       cli_config:
-        # 执行模式: single-run | interactive
-        # - single-run: 单次执行（如 kimi --print）
-        # - interactive: 交互式会话（保留进程）
         mode: "single-run"
-        
-        # 输入方式: stdin | arg | file
-        # - stdin: 通过标准输入传递
-        # - arg: 通过命令行参数传递
-        # - file: 通过临时文件传递
         input_method: "arg"
-        
-        # 输出解析: raw | json | markdown
         output_format: "markdown"
-        
-        # 退出码处理
         success_exit_codes: [0]
-        
-        # 最大输出长度（字符）
-        max_output_length: 10000
+        max_output_length: 20000
       
-      # 健康检查配置（http/sse 模式下使用，CLI 模式忽略）
       health_check:
         enabled: false
       
-      # 重启策略（CLI 模式下表示重试策略）
       restart_policy:
         max_restarts: 2
         backoff_multiplier: 2
         initial_delay: 1000
     
+    # 简要提示词（Agent 模式下主要使用 system_prompt_path 指定的文件）
     prompt: |
-      你是一个专业的任务分析专家。你的职责是：
+      你是任务分析拆分专家。使用 Task 工具可以调用子 Agent：
+      - explorer: 探索项目结构
+      - validator: 验证验收标准
       
-      1. 分析用户输入的任务描述，评估其复杂度
-      2. 识别任务的关键组成部分和依赖关系
-      3. 如果任务较为复杂（需要多个步骤或涉及多个领域），将其拆分为清晰的子任务
-      4. 为每个子任务定义：
-         - 明确的标题和描述
-         - 优先级（high/medium/low）
-         - 预估完成时间
-         - 依赖关系（哪些子任务需要在其他子任务之前完成）
-      
-      分析原则：
-      - 保持子任务的独立性和可执行性
-      - 确保子任务的粒度适中（通常2-4小时可完成）
-      - 识别潜在的风险和阻塞点
-      - 提供清晰的执行顺序建议
-      
-      输出格式要求：
-      返回结构化的任务分析结果，包含原始任务概述、拆分后的子任务列表、执行建议和依赖关系图。
+      每个任务必须满足 SMART-TEST 原则。
 
   # Agent 2: 任务分配器 - 分配子任务给合适的 Agent 并跟踪状态
   - id: "task-dispatcher"
@@ -194,23 +179,42 @@ agents:
     priority: 3
     
     launch_config:
-      # CLI 模式示例（类似 kimi CLI 的编码模式）
+      # 使用 Kimi CLI Print 模式进行代码生成
+      # Print 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/print-mode.html
       transport: "cli"
       
-      # 使用 kimi CLI 进行代码生成
       command: "kimi"
       
-      # kimi CLI 参数
+      # Print 模式参数
+      # --print: 启用 Print 模式
+      # --final-message-only: 仅输出最终消息，跳过工具调用过程
+      # --system-prompt: 设置系统提示词
+      # -p: 传入用户指令
       args:
         - "--print"
-        - "--system-prompt-file"
-        - "./prompts/code-expert.txt"
-        - "--context-files"
-        - "{{context_files}}"        # 相关文件上下文
-        - "{{task}}"
+        - "--final-message-only"
+        - "--system-prompt"
+        - "{{system_prompt}}"
+        - "-p"
+        - "{{user_prompt}}"
       
+      # 参数模板
       arg_templates:
-        task: "请根据以下需求编写代码：\n{{input}}\n\n要求：\n1. 遵循项目编码规范\n2. 包含必要的单元测试\n3. 提供简要的实现说明"
+        system_prompt: |
+          你是一个资深的全栈开发工程师。请根据需求编写高质量的代码。
+          代码要求：
+          1. 遵循项目编码规范和最佳实践
+          2. 包含必要的错误处理和日志
+          3. 提供简要的实现说明
+        user_prompt: |
+          请根据以下需求编写代码：
+          {{task_text}}
+          
+          要求：
+          1. 遵循项目编码规范
+          2. 包含必要的单元测试
+          3. 提供简要的实现说明
+        task_text: "{{input}}"
         context_files: "{{relevant_files}}"
       
       cwd: "."
@@ -218,17 +222,15 @@ agents:
       env:
         AGENT_ID: "code-agent"
         AGENT_ROLE: "coder"
-        KIMI_MODEL: "kimi-latest"
         CODE_STYLE: "strict"
         AUTO_TEST: "true"
-        MAX_TOKENS: "8000"
       
       timeout: 120
       
       cli_config:
         mode: "single-run"
         input_method: "arg"
-        output_format: "markdown"
+        output_format: "markdown"         # 代码通常以 markdown 代码块形式输出
         success_exit_codes: [0]
         max_output_length: 20000
         
@@ -238,7 +240,7 @@ agents:
           # 从 markdown 代码块中提取代码
           extract_from_markdown: true
           # 支持的代码块语言
-          languages: ["typescript", "javascript", "python", "tsx", "jsx", "json"]
+          languages: ["typescript", "javascript", "python", "tsx", "jsx", "json", "css", "scss", "html", "yaml", "sql"]
       
       health_check:
         enabled: false
@@ -305,18 +307,34 @@ global:
   # Agent 间通信方式: direct(直接) | queue(队列) | event(事件)
   communication_mode: "event"
   
-  # CLI 工具全局配置
+  # Kimi CLI Print 模式全局默认配置
+  # Print 模式文档: https://moonshotai.github.io/kimi-cli/zh/customization/print-mode.html
+  # 
+  # Print 模式特点：
+  # 1. 非交互：执行完指令后自动退出，适合脚本调用
+  # 2. 自动审批：隐式启用 --yolo 模式，所有操作自动批准
+  # 3. 文本输出：AI 回复输出到 stdout
+  #
+  # 常用参数组合：
+  # - 基本用法: kimi --print -p "指令"
+  # - 仅最终消息: kimi --print --final-message-only -p "指令"
+  # - 快捷方式: kimi --quiet -p "指令"（等同于上一条）
+  # - JSON 输出: kimi --print --output-format=stream-json -p "指令"
+  # - 通过 stdin: echo "指令" | kimi --print
+  # - 使用 Agent: kimi --agent-file ./agent.yaml --print -p "指令"
   cli_defaults:
-    # 默认 CLI 命令（如果不指定则使用此默认值）
+    # 默认 CLI 命令
     default_command: "kimi"
     
     # 默认参数
+    # 推荐使用 --print --final-message-only 获得干净的输出
+    # 如需 JSON 格式，使用 --print --output-format=stream-json
     default_args:
       - "--print"
-      - "--no-stream"
+      - "--final-message-only"
     
     # 环境变量前缀（自动注入 AGENT_ID 等）
     env_prefix: "AGENT_"
     
-    # 临时文件目录（用于传递大输入）
+    # 临时文件目录（用于传递大输入或存储中间结果）
     temp_dir: "./tmp/agents"

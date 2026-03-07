@@ -1,0 +1,4 @@
+version: 1
+agent:
+  extend: default  # 继承默认 Agent
+  system_prompt_path: ../role/task-analyst.md  # 覆盖系统提示词
