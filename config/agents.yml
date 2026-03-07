@@ -1,5 +1,5 @@
 # Agent 配置文件
-# 定义三个核心 Agent 的职责和提示词
+# 定义三个核心 Agent 的职责、提示词和启动方式
 
 version: "1.0.0"
 description: "TodoList 任务处理 Agent 配置"
@@ -13,6 +13,81 @@ agents:
     description: "分析任务复杂度，将复杂任务拆分为可管理的子任务"
     enabled: true
     priority: 1
+    
+    # 启动配置：支持多种启动方式（stdio/http/sse/cli）
+    launch_config:
+      # 传输方式: stdio | http | sse | cli
+      # - stdio: 标准输入输出（本地子进程）
+      # - http: HTTP API 模式
+      # - sse: Server-Sent Events 模式
+      # - cli: 命令行工具模式（单次执行，如 kimi --print）
+      transport: "cli"
+      
+      # ==================== CLI 模式配置（如 kimi CLI）====================
+      # 启动命令，可以是系统命令或完整路径
+      command: "kimi"
+      
+      # 命令参数模板
+      # 支持变量替换: {{task}}, {{context}}, {{prompt}}
+      args:
+        - "--print"                    # 单行输出模式
+        - "--no-stream"                # 非流式输出
+        - "--system-prompt-file"       # 系统提示词文件
+        - "{{prompt_file}}"            # 提示词文件路径（动态替换）
+        - "{{task}}"                   # 任务描述（动态替换）
+      
+      # 参数模板（用于动态生成参数）
+      arg_templates:
+        task: "分析以下任务并提供详细的子任务拆分方案：\n{{input}}"
+        prompt_file: "./prompts/analyzer.txt"
+        context: "{{parent_task_context}}"
+      
+      # 工作目录
+      cwd: "."
+      
+      # 环境变量
+      env:
+        AGENT_ID: "task-analyzer"
+        AGENT_ROLE: "analyzer"
+        KIMI_MODEL: "kimi-latest"
+        LOG_LEVEL: "info"
+      
+      # 启动超时（秒）
+      # CLI 模式下这是单次执行的超时时间
+      timeout: 60
+      
+      # CLI 模式特有配置
+      cli_config:
+        # 执行模式: single-run | interactive
+        # - single-run: 单次执行（如 kimi --print）
+        # - interactive: 交互式会话（保留进程）
+        mode: "single-run"
+        
+        # 输入方式: stdin | arg | file
+        # - stdin: 通过标准输入传递
+        # - arg: 通过命令行参数传递
+        # - file: 通过临时文件传递
+        input_method: "arg"
+        
+        # 输出解析: raw | json | markdown
+        output_format: "markdown"
+        
+        # 退出码处理
+        success_exit_codes: [0]
+        
+        # 最大输出长度（字符）
+        max_output_length: 10000
+      
+      # 健康检查配置（http/sse 模式下使用，CLI 模式忽略）
+      health_check:
+        enabled: false
+      
+      # 重启策略（CLI 模式下表示重试策略）
+      restart_policy:
+        max_restarts: 2
+        backoff_multiplier: 2
+        initial_delay: 1000
+    
     prompt: |
       你是一个专业的任务分析专家。你的职责是：
       
@@ -41,6 +116,45 @@ agents:
     description: "根据子任务特性分配给对应的 Agent 处理，并跟踪更新任务状态"
     enabled: true
     priority: 2
+    
+    launch_config:
+      # HTTP API 模式示例
+      transport: "http"
+      
+      # HTTP 端点配置
+      endpoint:
+        host: "localhost"
+        port: 4003
+        base_path: "/api/v1"
+      
+      # 启动命令（用于启动 HTTP 服务）
+      command: "node"
+      args:
+        - "./dist/agents/task-dispatcher.js"
+        - "--port"
+        - "4003"
+      
+      cwd: "./agents"
+      
+      env:
+        AGENT_ID: "task-dispatcher"
+        AGENT_ROLE: "dispatcher"
+        API_PORT: "4003"
+        DISPATCH_STRATEGY: "round-robin"
+        QUEUE_SIZE: "100"
+      
+      timeout: 30
+      
+      health_check:
+        enabled: true
+        interval: 30
+        url: "http://localhost:4003/health"
+      
+      restart_policy:
+        max_restarts: 3
+        backoff_multiplier: 2
+        initial_delay: 1000
+    
     prompt: |
       你是一个智能任务调度专家。你的职责是：
       
@@ -78,6 +192,62 @@ agents:
     description: "执行具体的编码实现任务，包括编写代码、单元测试和文档"
     enabled: true
     priority: 3
+    
+    launch_config:
+      # CLI 模式示例（类似 kimi CLI 的编码模式）
+      transport: "cli"
+      
+      # 使用 kimi CLI 进行代码生成
+      command: "kimi"
+      
+      # kimi CLI 参数
+      args:
+        - "--print"
+        - "--system-prompt-file"
+        - "./prompts/code-expert.txt"
+        - "--context-files"
+        - "{{context_files}}"        # 相关文件上下文
+        - "{{task}}"
+      
+      arg_templates:
+        task: "请根据以下需求编写代码：\n{{input}}\n\n要求：\n1. 遵循项目编码规范\n2. 包含必要的单元测试\n3. 提供简要的实现说明"
+        context_files: "{{relevant_files}}"
+      
+      cwd: "."
+      
+      env:
+        AGENT_ID: "code-agent"
+        AGENT_ROLE: "coder"
+        KIMI_MODEL: "kimi-latest"
+        CODE_STYLE: "strict"
+        AUTO_TEST: "true"
+        MAX_TOKENS: "8000"
+      
+      timeout: 120
+      
+      cli_config:
+        mode: "single-run"
+        input_method: "arg"
+        output_format: "markdown"
+        success_exit_codes: [0]
+        max_output_length: 20000
+        
+        # 代码提取配置
+        code_extraction:
+          enabled: true
+          # 从 markdown 代码块中提取代码
+          extract_from_markdown: true
+          # 支持的代码块语言
+          languages: ["typescript", "javascript", "python", "tsx", "jsx", "json"]
+      
+      health_check:
+        enabled: false
+      
+      restart_policy:
+        max_restarts: 2
+        backoff_multiplier: 2
+        initial_delay: 1000
+    
     prompt: |
       你是一个资深的全栈开发工程师。你的职责是：
       
@@ -134,3 +304,19 @@ global:
   
   # Agent 间通信方式: direct(直接) | queue(队列) | event(事件)
   communication_mode: "event"
+  
+  # CLI 工具全局配置
+  cli_defaults:
+    # 默认 CLI 命令（如果不指定则使用此默认值）
+    default_command: "kimi"
+    
+    # 默认参数
+    default_args:
+      - "--print"
+      - "--no-stream"
+    
+    # 环境变量前缀（自动注入 AGENT_ID 等）
+    env_prefix: "AGENT_"
+    
+    # 临时文件目录（用于传递大输入）
+    temp_dir: "./tmp/agents"

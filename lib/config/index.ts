@@ -31,6 +31,17 @@ export type {
   ExecutionMode,
   CommunicationMode,
   AgentLookupOptions,
+  LaunchConfig,
+  TransportType,
+  EndpointConfig,
+  HealthCheckConfig,
+  RestartPolicyConfig,
+  CliConfig,
+  CliMode,
+  CliInputMethod,
+  CliOutputFormat,
+  CodeExtractionConfig,
+  CliDefaultsConfig,
 } from "./types";
 
 // 加载器

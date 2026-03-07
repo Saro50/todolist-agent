@@ -8,6 +8,8 @@ import { TodoFilter } from "./TodoFilter";
 import { EmptyState } from "@/app/components/ui/EmptyState";
 import { Button } from "@/app/components/ui/Button";
 import { useTodos } from "@/lib/hooks/useTodos";
+import { useTaskAnalyzer, TaskAnalysisResult } from "@/lib/hooks/useTaskAnalyzer";
+import { TaskAnalysisModal } from "./TaskAnalysisModal";
 
 const EMPTY_MESSAGES: Record<TodoStatus, { title: string; description: string }> = {
   all: { title: "还没有任务", description: "添加一个开始管理吧！" },
@@ -44,6 +46,17 @@ export function TodoList() {
 
   const [statusFilter, setStatusFilter] = useState<TodoStatus>("all");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  
+  // 任务分析相关
+  const {
+    isAnalyzing,
+    error: analyzeError,
+    result: analyzeResult,
+    analyzeTask,
+    clearResult,
+  } = useTaskAnalyzer();
+  const [analyzingTodo, setAnalyzingTodo] = useState<Todo | null>(null);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
 
   // 加载所有任务的子任务
   useEffect(() => {
@@ -93,6 +106,26 @@ export function TodoList() {
         : [...prev, tagId]
     );
   }, []);
+
+  // 分析任务
+  const handleAnalyze = useCallback(async (todo: Todo) => {
+    setAnalyzingTodo(todo);
+    setIsAnalysisModalOpen(true);
+    await analyzeTask(todo.text, todo.id);
+  }, [analyzeTask]);
+
+  // 应用分析结果的子任务
+  const handleApplySubTasks = useCallback(async (subTasks: TaskAnalysisResult["subTasks"]) => {
+    if (!analyzingTodo) return;
+    
+    for (const subTask of subTasks) {
+      await addSubTask(analyzingTodo.id, `${subTask.title} (${subTask.estimatedTime})`);
+    }
+    
+    setIsAnalysisModalOpen(false);
+    clearResult();
+    setAnalyzingTodo(null);
+  }, [analyzingTodo, addSubTask, clearResult]);
 
   const emptyMessage = EMPTY_MESSAGES[statusFilter];
   const hasFilters = tagFilter.length > 0;
@@ -163,6 +196,7 @@ export function TodoList() {
               onUpdateSubTask={updateSubTask}
               onUpdateSubTaskArtifact={updateSubTaskArtifact}
               onUpdateArtifact={updateTodoArtifact}
+              onAnalyze={handleAnalyze}
             />
           ))
         )}
@@ -178,6 +212,20 @@ export function TodoList() {
           </Button>
         </div>
       )}
+
+      {/* 任务分析弹窗 */}
+      <TaskAnalysisModal
+        isOpen={isAnalysisModalOpen}
+        onClose={() => {
+          setIsAnalysisModalOpen(false);
+          clearResult();
+          setAnalyzingTodo(null);
+        }}
+        result={analyzeResult}
+        isLoading={isAnalyzing}
+        error={analyzeError}
+        onApplySubTasks={handleApplySubTasks}
+      />
     </div>
   );
 }
