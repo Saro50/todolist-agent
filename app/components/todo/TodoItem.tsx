@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, useCallback } from "react";
 import { Todo, Tag, SubTask, ProcessingStatus } from "@/app/types";
 import { Card } from "@/app/components/ui/Card";
 import { Checkbox } from "@/app/components/ui/Checkbox";
@@ -23,8 +23,10 @@ interface TodoItemProps {
   // 状态相关
   onUpdateStatus: (id: string, status: ProcessingStatus) => Promise<void>;
   
-  // 子任务相关
+  // 子任务相关（懒加载）
   subTasks?: SubTask[];
+  isSubTasksLoaded?: boolean;  // 子任务是否已加载
+  onLoadSubTasks?: (todoId: string) => Promise<void>;  // 加载子任务
   onAddSubTask: (todoId: string, text: string) => Promise<void>;
   onToggleSubTask: (subTaskId: string, completed: boolean) => Promise<void>;
   onDeleteSubTask: (subTaskId: string) => Promise<void>;
@@ -52,6 +54,8 @@ export const TodoItem = memo(function TodoItem({
   onTagClick,
   onUpdateStatus,
   subTasks = [],
+  isSubTasksLoaded = false,
+  onLoadSubTasks,
   onAddSubTask,
   onToggleSubTask,
   onDeleteSubTask,
@@ -63,12 +67,29 @@ export const TodoItem = memo(function TodoItem({
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showArtifact, setShowArtifact] = useState(false);
+  const [isLoadingSubTasks, setIsLoadingSubTasks] = useState(false);
   
   // 获取任务关联的标签对象
   const todoTags = tags.filter((tag) => todo.tagIds.includes(tag.id));
   const hasSubTasks = subTasks.length > 0;
   const completedSubTasks = subTasks.filter((st) => st.completed).length;
   const hasArtifact = !!todo.artifact?.trim();
+
+  // 处理展开/收起子任务
+  const handleToggleExpand = useCallback(async () => {
+    // 如果展开且子任务未加载，先加载子任务
+    if (!isExpanded && !isSubTasksLoaded && onLoadSubTasks) {
+      setIsLoadingSubTasks(true);
+      try {
+        await onLoadSubTasks(todo.id);
+      } catch (err) {
+        console.error("Failed to load subtasks:", err);
+      } finally {
+        setIsLoadingSubTasks(false);
+      }
+    }
+    setIsExpanded(!isExpanded);
+  }, [isExpanded, isSubTasksLoaded, onLoadSubTasks, todo.id]);
 
   // 状态配置
   const statusConfig: Record<ProcessingStatus, { label: string; color: string; bgColor: string }> = {
@@ -161,19 +182,28 @@ export const TodoItem = memo(function TodoItem({
         {/* 子任务计数徽章 */}
         {hasSubTasks && (
           <button
-            onClick={() => setIsExpanded(!isExpanded)}
+            onClick={handleToggleExpand}
+            disabled={isLoadingSubTasks}
             className={cn(
               "flex items-center gap-1 px-2 py-1 rounded-full text-xs",
               "transition-colors",
               isExpanded
                 ? "bg-emerald-100 text-emerald-600"
-                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                : "bg-gray-100 text-gray-500 hover:bg-gray-200",
+              isLoadingSubTasks && "opacity-50 cursor-wait"
             )}
             title="点击查看子任务"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-            </svg>
+            {isLoadingSubTasks ? (
+              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            )}
             {completedSubTasks}/{subTasks.length}
           </button>
         )}
@@ -243,10 +273,12 @@ export const TodoItem = memo(function TodoItem({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={handleToggleExpand}
+              disabled={isLoadingSubTasks}
               className={cn(
                 "opacity-0 group-hover:opacity-100",
-                isExpanded && "opacity-100 text-blue-500 bg-blue-50"
+                isExpanded && "opacity-100 text-blue-500 bg-blue-50",
+                isLoadingSubTasks && "opacity-50 cursor-wait"
               )}
               aria-label="添加子任务"
             >
@@ -326,8 +358,8 @@ export const TodoItem = memo(function TodoItem({
         </div>
       )}
 
-      {/* 子任务列表 */}
-      {(isExpanded || hasSubTasks) && (
+      {/* 子任务列表 - 仅展开时显示 */}
+      {isExpanded && (
         <div className="mt-2 pt-3 border-t border-gray-100">
           <SubTaskList
             todoId={todo.id}

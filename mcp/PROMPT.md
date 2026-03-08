@@ -198,7 +198,7 @@
 create_todo({
   text: "[实施] 实现登录接口",
   status: "pending",      // 可选：pending/in_progress/completed
-  workspace: "/project"
+  workspace: "/path/to/project"
 })
 
 // 更新任务状态
@@ -230,7 +230,7 @@ user: 帮我添加一个登录功能
 → 调用 create_todo({
      text: "[需求] 实现用户登录功能",
      status: "pending",           // 初始状态：待处理
-     workspace: "/current-project",
+     workspace: "/path/to/project",
      tagIds: ["需求标签ID"]
    })
 → 调用 create_subtask(todoId, "用户可以通过邮箱+密码登录")
@@ -246,7 +246,7 @@ user: 帮我添加一个登录功能
 ```
 → 调用 create_todo({
      text: "[技术规划] 登录功能技术方案",
-     workspace: "/current-project",
+     workspace: "/path/to/project",
      tagIds: ["技术规划标签ID"]
    })
 → 调用 create_subtask(todoId, "[可测试] 设计数据库用户表（包含id,email,password_hash字段）")
@@ -259,7 +259,7 @@ user: 帮我添加一个登录功能
 → 调用 create_todo({
      text: "[实施] 创建用户数据库表",
      status: "pending",
-     workspace: "/current-project",
+     workspace: "/path/to/project",
      tagIds: ["实施标签ID"]
    })
 → 开始编码时调用 update_todo({

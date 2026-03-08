@@ -36,15 +36,46 @@ export interface TransactionContext {
 // ==================== Repository 接口 ====================
 
 /**
+ * 分页参数
+ */
+export interface PaginationParams {
+  page: number;      // 页码，从 1 开始
+  pageSize: number;  // 每页数量
+}
+
+/**
+ * 分页结果
+ */
+export interface PaginatedResult<T> {
+  data: T[];           // 当前页数据
+  total: number;       // 总数量
+  page: number;        // 当前页码
+  pageSize: number;    // 每页数量
+  totalPages: number;  // 总页数
+}
+
+/**
+ * 筛选参数
+ */
+export interface FilterParams {
+  status?: string;      // 状态筛选：pending/in_progress/completed
+  tagId?: string;       // 标签筛选
+}
+
+/**
  * Todo 数据访问接口
  */
 export interface ITodoRepository {
   // 查询
   findAll(workspacePath?: string): Promise<Todo[]>;
+  findAllPaginated(workspacePath?: string, pagination?: PaginationParams, filters?: FilterParams): Promise<PaginatedResult<Todo>>;
   findById(id: string): Promise<Todo | null>;
   findByTag(tagId: string, workspacePath?: string): Promise<Todo[]>;
   findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]>;
   findByWorkspace(workspacePath: string): Promise<Todo[]>;
+  
+  // 统计（支持筛选）
+  count(workspacePath?: string, filters?: FilterParams): Promise<number>;
   
   // 增删改
   create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo>;

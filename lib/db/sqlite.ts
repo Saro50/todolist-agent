@@ -55,6 +55,123 @@ class SQLiteTodoRepository implements ITodoRepository {
     return rows.map(this.rowToTodo);
   }
 
+  async findAllPaginated(
+    workspacePath?: string, 
+    pagination?: { page: number; pageSize: number },
+    filters?: { status?: string; tagId?: string }
+  ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
+    const page = pagination?.page || 1;
+    const pageSize = pagination?.pageSize || 20;
+    const offset = (page - 1) * pageSize;
+
+    // 构建 WHERE 子句
+    const whereConditions: string[] = [];
+    const whereParams: any[] = [];
+    
+    if (workspacePath) {
+      whereConditions.push(`t.workspace_path = ?`);
+      whereParams.push(workspacePath);
+    }
+    
+    if (filters?.status) {
+      whereConditions.push(`t.status = ?`);
+      whereParams.push(filters.status);
+    }
+
+    const whereClause = whereConditions.length > 0 
+      ? `WHERE ${whereConditions.join(' AND ')}` 
+      : '';
+
+    // 如果有标签筛选，使用子查询
+    let tagJoin = '';
+    let tagWhere = '';
+    if (filters?.tagId) {
+      tagJoin = `INNER JOIN todo_tags tt_filter ON t.id = tt_filter.todo_id`;
+      tagWhere = `AND tt_filter.tag_id = ?`;
+      whereParams.push(filters.tagId);
+    }
+
+    // 获取总数
+    const total = await this.count(workspacePath, filters);
+    const totalPages = Math.ceil(total / pageSize);
+
+    // 获取分页数据
+    let sql = `
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      ${tagJoin}
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      ${whereClause}
+      ${tagWhere}
+    `;
+    
+    const params = [...whereParams];
+    
+    sql += ` GROUP BY t.id ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(pageSize, offset);
+    
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+    
+    return {
+      data: rows.map(this.rowToTodo),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    };
+  }
+
+  async count(workspacePath?: string, filters?: { status?: string; tagId?: string }): Promise<number> {
+    // 如果有标签筛选，使用子查询
+    if (filters?.tagId) {
+      let sql = `
+        SELECT COUNT(DISTINCT t.id) as count 
+        FROM todos t
+        INNER JOIN todo_tags tt ON t.id = tt.todo_id
+        WHERE tt.tag_id = ?
+      `;
+      const params: any[] = [filters.tagId];
+      
+      if (workspacePath) {
+        sql += ` AND t.workspace_path = ?`;
+        params.push(workspacePath);
+      }
+      
+      if (filters?.status) {
+        sql += ` AND t.status = ?`;
+        params.push(filters.status);
+      }
+      
+      const stmt = this.db.prepare(sql);
+      const row = stmt.get(...params) as any;
+      return row?.count || 0;
+    }
+    
+    // 普通计数
+    let sql = `SELECT COUNT(*) as count FROM todos`;
+    const params: any[] = [];
+    const conditions: string[] = [];
+    
+    if (workspacePath) {
+      conditions.push(`workspace_path = ?`);
+      params.push(workspacePath);
+    }
+    
+    if (filters?.status) {
+      conditions.push(`status = ?`);
+      params.push(filters.status);
+    }
+    
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    
+    const stmt = this.db.prepare(sql);
+    const row = stmt.get(...params) as any;
+    return row?.count || 0;
+  }
+
   async findById(id: string): Promise<Todo | null> {
     const stmt = this.db.prepare(`
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids

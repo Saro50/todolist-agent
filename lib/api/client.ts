@@ -36,16 +36,64 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ==================== Todo API ====================
 
+export interface TodoFilters {
+  status?: "pending" | "in_progress" | "completed";  // 状态筛选
+  tagId?: string;  // 标签筛选
+}
+
+export interface PaginatedTodos {
+  data: Todo[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 export const todoApi = {
   /**
    * 获取任务列表
    * @param workspacePath - 可选的工作目录路径，不传则获取所有任务
    */
   getAll(workspacePath?: string): Promise<Todo[]> {
-    const params = workspacePath && workspacePath !== "/" 
+    // 只有在明确指定工作区时才添加参数
+    // workspacePath 为 undefined 或 null 时获取所有任务
+    // workspacePath 为 "/" 时获取根目录任务
+    // workspacePath 为其他值时获取指定工作区的任务
+    const params = workspacePath !== undefined 
       ? `?workspace=${encodeURIComponent(workspacePath)}` 
       : "";
     return fetchJson(`${API_BASE}/todos${params}`);
+  },
+
+  /**
+   * 获取分页任务列表（支持筛选）
+   * @param workspacePath - 可选的工作目录路径
+   * @param page - 页码，从 1 开始
+   * @param pageSize - 每页数量
+   * @param filters - 筛选条件（状态、标签）
+   */
+  getAllPaginated(
+    workspacePath?: string, 
+    page: number = 1, 
+    pageSize: number = 20,
+    filters?: TodoFilters
+  ): Promise<PaginatedTodos> {
+    const params = new URLSearchParams();
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    params.append("page", String(page));
+    params.append("pageSize", String(pageSize));
+    
+    // 添加筛选参数
+    if (filters?.status) {
+      params.append("status", filters.status);
+    }
+    if (filters?.tagId) {
+      params.append("tag", filters.tagId);
+    }
+    
+    return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
 
   getById(id: string): Promise<Todo> {
@@ -55,7 +103,7 @@ export const todoApi = {
   getByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return fetchJson(`${API_BASE}/todos?${params.toString()}`);
@@ -64,7 +112,7 @@ export const todoApi = {
   getByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return fetchJson(`${API_BASE}/todos?${params.toString()}`);

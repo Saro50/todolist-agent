@@ -86,16 +86,30 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ==================== Todo API ====================
 
+export interface TodoFilters {
+  status?: "pending" | "in_progress" | "completed";
+  tagId?: string;
+}
+
 export const todoApi = {
   /**
    * 获取任务列表
    * @param workspacePath - 可选的工作区路径，不传则获取所有任务
+   * @param filters - 可选的筛选条件
    */
-  getAll(workspacePath?: string): Promise<Todo[]> {
-    const params = workspacePath && workspacePath !== "/" 
-      ? `?workspace=${encodeURIComponent(workspacePath)}` 
-      : "";
-    return fetchJson(`/api/todos${params}`);
+  getAll(workspacePath?: string, filters?: TodoFilters): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    if (filters?.status) {
+      params.append("status", filters.status);
+    }
+    if (filters?.tagId) {
+      params.append("tag", filters.tagId);
+    }
+    const query = params.toString();
+    return fetchJson(`/api/todos${query ? `?${query}` : ""}`);
   },
 
   getById(id: string): Promise<Todo> {
@@ -105,7 +119,7 @@ export const todoApi = {
   getByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return fetchJson(`/api/todos?${params.toString()}`);
@@ -114,7 +128,7 @@ export const todoApi = {
   getByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return fetchJson(`/api/todos?${params.toString()}`);

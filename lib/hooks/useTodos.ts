@@ -1,17 +1,46 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Todo, Tag, SubTask, Workspace, ProcessingStatus } from "@/app/types";
-import { api } from "@/lib/api/client";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Todo, Tag, SubTask, Workspace, ProcessingStatus, TodoFilterStatus } from "@/app/types";
+import { api, PaginatedTodos, TodoFilters } from "@/lib/api/client";
+
+// 默认每页数量
+const DEFAULT_PAGE_SIZE = 20;
 
 interface UseTodosReturn {
+  // 数据
   todos: Todo[];
   tags: Tag[];
   subTasks: Record<string, SubTask[]>;
+  loadedSubTaskIds: Set<string>;
+  
+  // 筛选状态
+  filters: {
+    status: TodoFilterStatus;
+    tagIds: string[];
+  };
+  
+  // 分页状态
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  
+  // 加载状态
   isLoading: boolean;
+  isLoadingMore: boolean;
   error: string | null;
+  
+  // 当前工作区
   currentWorkspace: Workspace;
   workspaces: Workspace[];
+  
+  // 筛选操作
+  setStatusFilter: (status: TodoFilterStatus) => void;
+  setTagFilter: (tagIds: string[]) => void;
+  clearFilters: () => void;
   
   // 操作函数
   addTodo: (text: string, tagIds: string[], workspacePath?: string) => Promise<void>;
@@ -27,7 +56,7 @@ interface UseTodosReturn {
   // 状态操作
   updateTodoStatus: (todoId: string, status: ProcessingStatus) => Promise<void>;
   
-  // 子任务操作
+  // 子任务操作（懒加载）
   addSubTask: (todoId: string, text: string) => Promise<void>;
   toggleSubTask: (subTaskId: string, completed: boolean) => Promise<void>;
   deleteSubTask: (subTaskId: string) => Promise<void>;
@@ -42,8 +71,10 @@ interface UseTodosReturn {
   deleteWorkspace: (id: string) => Promise<void>;
   refreshWorkspaces: () => Promise<void>;
   
-  // 重新加载
-  refetch: () => Promise<void>;
+  // 分页操作
+  goToPage: (page: number) => Promise<void>;
+  loadMore: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const ROOT_WORKSPACE: Workspace = {
@@ -54,14 +85,53 @@ const ROOT_WORKSPACE: Workspace = {
   createdAt: new Date(),
 };
 
+// 将前端筛选状态转换为 API 筛选参数
+function convertFilters(status: TodoFilterStatus, tagIds: string[]): TodoFilters {
+  const filters: TodoFilters = {};
+  
+  // 状态筛选
+  if (status !== "all") {
+    filters.status = status;
+  }
+  
+  // 标签筛选（只支持单个标签，取第一个）
+  if (tagIds.length > 0) {
+    filters.tagId = tagIds[0];
+  }
+  
+  return filters;
+}
+
 export function useTodos(): UseTodosReturn {
+  // 数据状态
   const [todos, setTodos] = useState<Todo[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [subTasks, setSubTasks] = useState<Record<string, SubTask[]>>({});
+  const [loadedSubTaskIds, setLoadedSubTaskIds] = useState<Set<string>>(new Set());
+  
+  // 筛选状态
+  const [statusFilter, setStatusFilter] = useState<TodoFilterStatus>("all");
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  
+  // 分页状态
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    total: 0,
+    totalPages: 0,
+  });
+  
+  // 加载状态
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // 工作区状态
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(ROOT_WORKSPACE);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([ROOT_WORKSPACE]);
+  
+  // 用于追踪当前加载的请求，避免竞态条件
+  const loadingRef = useRef<number>(0);
 
   // 加载工作区列表
   const loadWorkspaces = useCallback(async () => {
@@ -75,40 +145,128 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 加载数据
-  const loadData = useCallback(async (workspace?: Workspace) => {
+  // 加载任务数据（分页，支持筛选）
+  const loadData = useCallback(async (
+    workspace?: Workspace, 
+    page: number = 1, 
+    append: boolean = false,
+    filters?: TodoFilters
+  ) => {
+    const requestId = ++loadingRef.current;
+    
     try {
-      setIsLoading(true);
+      if (page === 1) {
+        setIsLoading(true);
+      } else {
+        setIsLoadingMore(true);
+      }
       setError(null);
       
       const targetWorkspace = workspace ?? currentWorkspace;
+      const effectiveFilters = filters ?? convertFilters(statusFilter, tagFilter);
       
-      const [todosData, tagsData] = await Promise.all([
-        api.todos.getAll(targetWorkspace.path),
+      // 并行加载任务和标签
+      const [todosResult, tagsData] = await Promise.all([
+        api.todos.getAllPaginated(
+          targetWorkspace.path, 
+          page, 
+          DEFAULT_PAGE_SIZE,
+          effectiveFilters
+        ),
         api.tags.getAll(),
       ]);
       
-      setTodos(todosData);
+      // 检查是否是最新请求
+      if (requestId !== loadingRef.current) return;
+      
+      // 更新任务数据
+      if (append) {
+        setTodos((prev) => [...prev, ...todosResult.data]);
+      } else {
+        setTodos(todosResult.data);
+        // 切换工作区或刷新时清空已加载的子任务
+        setSubTasks({});
+        setLoadedSubTaskIds(new Set());
+      }
+      
+      // 更新分页信息
+      setPagination({
+        page: todosResult.page,
+        pageSize: todosResult.pageSize,
+        total: todosResult.total,
+        totalPages: todosResult.totalPages,
+      });
+      
       setTags(tagsData);
     } catch (err) {
+      if (requestId !== loadingRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load data");
       console.error("Failed to load todos:", err);
     } finally {
-      setIsLoading(false);
+      if (requestId === loadingRef.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
-  }, [currentWorkspace]);
+  }, [currentWorkspace, statusFilter, tagFilter]);
 
   // 初始加载
   useEffect(() => {
     loadWorkspaces();
-    loadData();
-  }, [loadData, loadWorkspaces]);
+    loadData(undefined, 1, false);
+  }, []);
+
+  // 筛选变化时重新加载
+  useEffect(() => {
+    // 避免初始渲染时的重复加载
+    if (!isLoading || todos.length > 0) {
+      loadData(undefined, 1, false);
+    }
+  }, [statusFilter, tagFilter]);
 
   // 切换工作区
-  const switchWorkspace = useCallback((workspace: Workspace) => {
+  const switchWorkspace = useCallback(async (workspace: Workspace) => {
     setCurrentWorkspace(workspace);
-    loadData(workspace);
+    await loadData(workspace, 1, false);
   }, [loadData]);
+
+  // 设置状态筛选
+  const handleSetStatusFilter = useCallback((status: TodoFilterStatus) => {
+    setStatusFilter(status);
+    // 重置到第一页
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, []);
+
+  // 设置标签筛选
+  const handleSetTagFilter = useCallback((tagIds: string[]) => {
+    setTagFilter(tagIds);
+    // 重置到第一页
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, []);
+
+  // 清除筛选
+  const clearFilters = useCallback(() => {
+    setStatusFilter("all");
+    setTagFilter([]);
+    setPagination(prev => ({ ...prev, page: 1 }));
+  }, []);
+
+  // 分页跳转
+  const goToPage = useCallback(async (page: number) => {
+    const validPage = Math.max(1, Math.min(page, pagination.totalPages));
+    await loadData(undefined, validPage, false);
+  }, [loadData, pagination.totalPages]);
+
+  // 加载更多（下一页）
+  const loadMore = useCallback(async () => {
+    if (pagination.page >= pagination.totalPages || isLoadingMore) return;
+    await loadData(undefined, pagination.page + 1, true);
+  }, [loadData, pagination.page, pagination.totalPages, isLoadingMore]);
+
+  // 刷新当前页
+  const refresh = useCallback(async () => {
+    await loadData(undefined, pagination.page, false);
+  }, [loadData, pagination.page]);
 
   // 创建工作区
   const createWorkspace = useCallback(async (data: { name: string; color?: string }) => {
@@ -120,7 +278,6 @@ export function useTodos(): UseTodosReturn {
   const updateWorkspace = useCallback(async (id: string, data: Partial<Workspace>) => {
     await api.workspaces.update(id, data);
     await loadWorkspaces();
-    // 如果更新的是当前工作区，刷新当前工作区数据
     if (id === currentWorkspace.id) {
       const updated = await api.workspaces.getById(id);
       setCurrentWorkspace(updated);
@@ -131,12 +288,11 @@ export function useTodos(): UseTodosReturn {
   const deleteWorkspace = useCallback(async (id: string) => {
     await api.workspaces.delete(id);
     await loadWorkspaces();
-    // 如果删除的是当前工作区，切换到根目录
     if (id === currentWorkspace.id) {
       setCurrentWorkspace(ROOT_WORKSPACE);
-      await loadData(ROOT_WORKSPACE);
+      await loadData(ROOT_WORKSPACE, 1, false);
     }
-  }, [loadWorkspaces, currentWorkspace.id, loadData]);
+  }, [loadWorkspaces, loadData, currentWorkspace.id]);
 
   // 刷新工作区列表
   const refreshWorkspaces = useCallback(async () => {
@@ -149,14 +305,15 @@ export function useTodos(): UseTodosReturn {
       const targetPath = workspacePath ?? currentWorkspace.path;
       const newTodo = await api.todos.create({ text, tagIds, workspacePath: targetPath });
       
+      // 如果添加在当前工作区，刷新列表
       if (newTodo.workspacePath === currentWorkspace.path) {
-        setTodos((prev) => [newTodo, ...prev]);
+        await refresh();
       }
     } catch (err) {
       console.error("Failed to add todo:", err);
       throw err;
     }
-  }, [currentWorkspace.path]);
+  }, [currentWorkspace.path, refresh]);
 
   // 切换任务状态
   const toggleTodo = useCallback(async (id: string) => {
@@ -182,6 +339,11 @@ export function useTodos(): UseTodosReturn {
       setSubTasks((prev) => {
         const next = { ...prev };
         delete next[id];
+        return next;
+      });
+      setLoadedSubTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
         return next;
       });
     } catch (err) {
@@ -238,12 +400,13 @@ export function useTodos(): UseTodosReturn {
       
       await Promise.all(completedIds.map((id) => api.todos.delete(id)));
       
-      setTodos((prev) => prev.filter((t) => !t.completed));
+      // 刷新当前页
+      await refresh();
     } catch (err) {
       console.error("Failed to clear completed:", err);
       throw err;
     }
-  }, [todos]);
+  }, [todos, refresh]);
 
   // 创建标签
   const createTag = useCallback(async (name: string, color: Tag["color"]) => {
@@ -257,19 +420,25 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 子任务操作
+  // ============ 子任务操作（懒加载） ============
+
+  // 加载子任务（点击展开时调用）
   const loadSubTasks = useCallback(async (todoId: string) => {
+    // 如果已加载，不再重复加载
+    if (loadedSubTaskIds.has(todoId)) return;
+    
     try {
       const subTasksData = await api.subTasks.getByTodoId(todoId);
       setSubTasks((prev) => ({
         ...prev,
         [todoId]: subTasksData,
       }));
+      setLoadedSubTaskIds((prev) => new Set(prev).add(todoId));
     } catch (err) {
       console.error("Failed to load subtasks:", err);
       throw err;
     }
-  }, []);
+  }, [loadedSubTaskIds]);
 
   const addSubTask = useCallback(async (todoId: string, text: string) => {
     try {
@@ -278,6 +447,8 @@ export function useTodos(): UseTodosReturn {
         ...prev,
         [todoId]: [...(prev[todoId] || []), newSubTask],
       }));
+      // 标记为已加载
+      setLoadedSubTaskIds((prev) => new Set(prev).add(todoId));
     } catch (err) {
       console.error("Failed to add subtask:", err);
       throw err;
@@ -359,13 +530,36 @@ export function useTodos(): UseTodosReturn {
   }, []);
 
   return {
+    // 数据
     todos,
     tags,
     subTasks,
+    loadedSubTaskIds,
+    
+    // 筛选状态
+    filters: {
+      status: statusFilter,
+      tagIds: tagFilter,
+    },
+    
+    // 分页状态
+    pagination,
+    
+    // 加载状态
     isLoading,
+    isLoadingMore,
     error,
+    
+    // 工作区
     currentWorkspace,
     workspaces,
+    
+    // 筛选操作
+    setStatusFilter: handleSetStatusFilter,
+    setTagFilter: handleSetTagFilter,
+    clearFilters,
+    
+    // 操作函数
     addTodo,
     toggleTodo,
     deleteTodo,
@@ -374,17 +568,25 @@ export function useTodos(): UseTodosReturn {
     updateTodoStatus,
     clearCompleted,
     createTag,
+    
+    // 子任务操作
     addSubTask,
     toggleSubTask,
     deleteSubTask,
     updateSubTask,
     updateSubTaskArtifact,
     loadSubTasks,
+    
+    // 工作区操作
     switchWorkspace,
     createWorkspace,
     updateWorkspace,
     deleteWorkspace,
     refreshWorkspaces,
-    refetch: loadData,
+    
+    // 分页操作
+    goToPage,
+    loadMore,
+    refresh,
   };
 }

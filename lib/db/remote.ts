@@ -61,10 +61,48 @@ abstract class BaseRemoteRepository {
 
 class RemoteTodoRepository extends BaseRemoteRepository implements ITodoRepository {
   async findAll(workspacePath?: string): Promise<Todo[]> {
-    const params = workspacePath && workspacePath !== "/" 
+    const params = workspacePath !== undefined
       ? `?workspace=${encodeURIComponent(workspacePath)}` 
       : "";
     return this.fetch(`/api/todos${params}`);
+  }
+
+  async findAllPaginated(
+    workspacePath?: string, 
+    pagination?: { page: number; pageSize: number },
+    filters?: { status?: string; tagId?: string }
+  ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
+    const params = new URLSearchParams();
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    if (pagination) {
+      params.append("page", String(pagination.page));
+      params.append("pageSize", String(pagination.pageSize));
+    }
+    if (filters?.status) {
+      params.append("status", filters.status);
+    }
+    if (filters?.tagId) {
+      params.append("tag", filters.tagId);
+    }
+    return this.fetch(`/api/todos?${params.toString()}`);
+  }
+
+  async count(workspacePath?: string, filters?: { status?: string; tagId?: string }): Promise<number> {
+    const params = new URLSearchParams();
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    if (filters?.status) {
+      params.append("status", filters.status);
+    }
+    if (filters?.tagId) {
+      params.append("tag", filters.tagId);
+    }
+    params.append("count", "true");
+    const result = await this.fetch(`/api/todos?${params.toString()}`);
+    return result.count;
   }
 
   async findById(id: string): Promise<Todo | null> {
@@ -79,7 +117,7 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
   async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return this.fetch(`/api/todos?${params.toString()}`);
@@ -88,7 +126,7 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
   async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath && workspacePath !== "/") {
+    if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
     }
     return this.fetch(`/api/todos?${params.toString()}`);

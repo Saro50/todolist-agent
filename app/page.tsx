@@ -7,9 +7,9 @@ export default function Home() {
       <div className="max-w-xl mx-auto">
         <header className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2 tracking-tight">
-            Todo List
+            AI待办任务看板
           </h1>
-          <p className="text-gray-500">简洁高效的任务管理</p>
+          <p className="text-gray-500">智能任务管理</p>
         </header>
 
         <Card className="bg-white/50 backdrop-blur-sm shadow-sm border-white/50">

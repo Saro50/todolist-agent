@@ -208,6 +208,36 @@ export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
     // 使用参数指定的工作区，不传则创建在根目录
     const workspacePath = params.workspace || "/";
     
+    // 打印传入参数，方便调试
+    console.log(`[MCP create_todo] 参数:`, JSON.stringify({
+      text: params.text,
+      workspace: params.workspace,
+      workspacePath,
+      status: params.status,
+      tagIds: params.tagIds,
+      hasArtifact: !!params.artifact,
+    }));
+    
+    // 检查工作区是否存在（根目录始终允许）
+    if (workspacePath !== "/") {
+      const workspaces = await api.workspaces.getAll();
+      const workspaceExists = workspaces.some((w: any) => 
+        w.path === workspacePath || w.id === workspacePath
+      );
+      
+      if (!workspaceExists) {
+        const availableWorkspaces = workspaces.map((w: any) => `${w.name}(${w.path})`).join(", ") || "无";
+        console.error(`[MCP create_todo] 错误: 工作区不存在: ${workspacePath}`);
+        return {
+          content: [{ 
+            type: "text", 
+            text: `❌ 任务创建失败: 工作区 "${workspacePath}" 不存在\n\n可用工作区: ${availableWorkspaces}\n\n请先使用 create_workspace 创建工作区，或使用 "/" 创建在根目录。` 
+          }],
+          isError: true,
+        };
+      }
+    }
+    
     const todo = await api.todos.create({
       text: params.text,
       tagIds: params.tagIds || [],
@@ -216,10 +246,13 @@ export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
       status: params.status,
     });
     
+    console.log(`[MCP create_todo] 成功创建任务: ${todo.id}, 工作区: ${todo.workspacePath}`);
+    
     return {
       content: [{ type: "text", text: `✅ 任务创建成功\n\n${formatTodo(todo)}` }],
     };
   } catch (error) {
+    console.error(`[MCP create_todo] 错误:`, error);
     return handleError(error);
   }
 }
@@ -229,12 +262,22 @@ export async function handleUpdateTodo(args: unknown): Promise<ToolResult> {
     const params = UpdateTodoSchema.parse(args || {});
     const { id, ...data } = params;
     
+    // 打印传入参数，方便调试
+    console.log(`[MCP update_todo] 参数:`, JSON.stringify({
+      id,
+      ...data,
+      hasWorkspace: !!data.workspace,
+    }));
+    
     const todo = await api.todos.update(id, data);
+    
+    console.log(`[MCP update_todo] 成功更新任务: ${todo?.id}, 工作区: ${todo?.workspacePath}`);
     
     return {
       content: [{ type: "text", text: `✅ 任务更新成功\n\n${formatTodo(todo!)}` }],
     };
   } catch (error) {
+    console.error(`[MCP update_todo] 错误:`, error);
     return handleError(error);
   }
 }
