@@ -5,12 +5,13 @@
  * 支持多工作目录隔离
  */
 
-import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
+import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput, Workspace } from "@/app/types";
 import {
   IDatabase,
   ITodoRepository,
   ITagRepository,
   ISubTaskRepository,
+  IWorkspaceRepository,
   TransactionContext,
   ISyncable,
   ChangeLog,
@@ -338,6 +339,71 @@ class RemoteSubTaskRepository extends BaseRemoteRepository implements ISubTaskRe
   }
 }
 
+// ==================== Remote Workspace Repository ====================
+
+class RemoteWorkspaceRepository extends BaseRemoteRepository implements IWorkspaceRepository {
+  async findAll(): Promise<Workspace[]> {
+    return this.fetch("/api/workspaces");
+  }
+
+  async findById(id: string): Promise<Workspace | null> {
+    try {
+      return await this.fetch(`/api/workspaces/${id}`);
+    } catch {
+      return null;
+    }
+  }
+
+  async findByPath(path: string): Promise<Workspace | null> {
+    try {
+      return await this.fetch(`/api/workspaces/by-path?path=${encodeURIComponent(path)}`);
+    } catch {
+      return null;
+    }
+  }
+
+  async create(data: Omit<Workspace, "id" | "createdAt">): Promise<Workspace> {
+    return this.fetch("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async update(id: string, data: Partial<Workspace>): Promise<Workspace | null> {
+    try {
+      return await this.fetch(`/api/workspaces/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async delete(id: string): Promise<boolean> {
+    try {
+      await this.fetch(`/api/workspaces/${id}`, { method: "DELETE" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getTodoCount(id: string): Promise<number> {
+    try {
+      const result = await this.fetch(`/api/workspaces/${id}/todos/count`);
+      return result.count || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async generateUniquePath(name: string): Promise<string> {
+    const result = await this.fetch(`/api/workspaces/generate-path?name=${encodeURIComponent(name)}`);
+    return result.path;
+  }
+}
+
 // ==================== Remote Database ====================
 
 export class RemoteDatabase implements IDatabase, ISyncable {
@@ -345,6 +411,7 @@ export class RemoteDatabase implements IDatabase, ISyncable {
   public todos!: ITodoRepository;
   public tags!: ITagRepository;
   public subTasks!: ISubTaskRepository;
+  public workspaces!: IWorkspaceRepository;
 
   constructor(private config: { remoteUrl: string; apiKey?: string }) {}
 
@@ -370,6 +437,10 @@ export class RemoteDatabase implements IDatabase, ISyncable {
         this.config.apiKey
       );
       this.subTasks = new RemoteSubTaskRepository(
+        this.config.remoteUrl,
+        this.config.apiKey
+      );
+      this.workspaces = new RemoteWorkspaceRepository(
         this.config.remoteUrl,
         this.config.apiKey
       );

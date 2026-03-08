@@ -7,9 +7,12 @@
  */
 
 // 类型定义内联，避免复杂的路径解析
+type ProcessingStatus = "pending" | "in_progress" | "completed";
+
 type Todo = {
   id: string;
   text: string;
+  status: ProcessingStatus;
   completed: boolean;
   createdAt: Date;
   tagIds: string[];
@@ -126,6 +129,7 @@ export const todoApi = {
 
   create(data: { 
     text: string; 
+    status?: ProcessingStatus;
     completed?: boolean; 
     tagIds?: string[]; 
     artifact?: string;

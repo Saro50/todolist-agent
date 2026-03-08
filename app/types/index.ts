@@ -25,6 +25,20 @@ export function getTagColorStyle(colorKey: TagColor) {
   return TAG_COLORS.find(c => c.key === colorKey) || TAG_COLORS[0];
 }
 
+// ==================== 任务处理状态 ====================
+
+export type TaskStatus = "pending" | "in_progress" | "completed";
+
+export const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; bg: string; icon: string }> = {
+  pending: { label: "待处理", color: "text-slate-500", bg: "bg-slate-100", icon: "⏸️" },
+  in_progress: { label: "处理中", color: "text-amber-600", bg: "bg-amber-100", icon: "▶️" },
+  completed: { label: "已完成", color: "text-emerald-600", bg: "bg-emerald-100", icon: "✅" },
+};
+
+export function getTaskStatusConfig(status: TaskStatus) {
+  return TASK_STATUS_CONFIG[status];
+}
+
 // ==================== 子任务类型 ====================
 
 export interface SubTask {
@@ -42,15 +56,21 @@ export interface SubTask {
 export interface Todo {
   id: string;
   text: string;
-  completed: boolean;
-  createdAt: Date;
+  status: TaskStatus;    // 处理状态：待处理/处理中/已完成
+  completed: boolean;    // 是否已完成（向后兼容，由 status 派生）
+  createdAt: Date;       // 创建时间
   tagIds: string[];      // 关联的标签 ID 列表
   subTasks?: SubTask[];  // 子任务列表（可选，加载时填充）
   artifact?: string;     // 产物：Markdown 报告
   workspacePath: string; // 工作目录路径：任务所属的工作空间
 }
 
+// 筛选用的状态类型
+export type TodoFilterStatus = "all" | "pending" | "in_progress" | "completed";
+
+// 向后兼容的类型别名
 export type TodoStatus = "all" | "active" | "completed";
+export type ProcessingStatus = TaskStatus;
 
 // ==================== 工作区类型 ====================
 

@@ -15,7 +15,8 @@ import {
   SubTask,
   Workspace,
   CreateSubTaskInput, 
-  UpdateSubTaskInput 
+  UpdateSubTaskInput,
+  ProcessingStatus
 } from "@/app/types";
 import {
   IDatabase,
@@ -127,16 +128,20 @@ class SQLiteTodoRepository implements ITodoRepository {
     const id = Date.now().toString();
     const createdAt = new Date();
     const workspacePath = todo.workspacePath || "/";
+    // 从 status 派生 completed，或从 completed 派生 status
+    const status = todo.status || (todo.completed ? "completed" : "pending");
+    const completed = status === "completed";
 
     const insertTodo = this.db.prepare(`
-      INSERT INTO todos (id, text, completed, created_at, artifact, workspace_path)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (id, text, status, completed, created_at, artifact, workspace_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertTodo.run(
       id, 
       todo.text, 
-      todo.completed ? 1 : 0, 
+      status,
+      completed ? 1 : 0, 
       createdAt.toISOString(), 
       todo.artifact || null,
       workspacePath
@@ -155,7 +160,8 @@ class SQLiteTodoRepository implements ITodoRepository {
     return {
       id,
       text: todo.text,
-      completed: todo.completed,
+      status,
+      completed,
       createdAt,
       tagIds: todo.tagIds || [],
       artifact: todo.artifact,
@@ -170,13 +176,29 @@ class SQLiteTodoRepository implements ITodoRepository {
     const updates: string[] = [];
     const values: any[] = [];
 
+    // 处理 status 和 completed 的同步逻辑
+    let status = data.status;
+    let completed = data.completed;
+
+    if (data.status !== undefined && data.completed === undefined) {
+      // 如果只更新了 status，同步 completed
+      completed = data.status === "completed";
+    } else if (data.completed !== undefined && data.status === undefined) {
+      // 如果只更新了 completed，同步 status
+      status = data.completed ? "completed" : (existing.status === "completed" ? "pending" : existing.status);
+    }
+
     if (data.text !== undefined) {
       updates.push("text = ?");
       values.push(data.text);
     }
-    if (data.completed !== undefined) {
+    if (status !== undefined) {
+      updates.push("status = ?");
+      values.push(status);
+    }
+    if (completed !== undefined) {
       updates.push("completed = ?");
-      values.push(data.completed ? 1 : 0);
+      values.push(completed ? 1 : 0);
     }
     if (data.artifact !== undefined) {
       updates.push("artifact = ?");
@@ -322,10 +344,12 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   private rowToTodo(row: any): Todo {
+    const status: ProcessingStatus = row.status || (row.completed ? "completed" : "pending");
     return {
       id: row.id,
       text: row.text,
-      completed: Boolean(row.completed),
+      status,
+      completed: status === "completed",
       createdAt: new Date(row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
       artifact: row.artifact || undefined,
@@ -741,12 +765,29 @@ export class SQLiteDatabase implements IDatabase {
       CREATE TABLE IF NOT EXISTS todos (
         id TEXT PRIMARY KEY,
         text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
         completed INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         artifact TEXT,
         workspace_path TEXT NOT NULL DEFAULT '/'
       );
     `);
+
+    // 迁移：为已存在的表添加 status 列
+    try {
+      this.db.exec(`ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
+    } catch {
+      // 列已存在，忽略错误
+    }
+
+    // 迁移：同步 status 和 completed 字段
+    try {
+      this.db.exec(`
+        UPDATE todos SET status = 'completed' WHERE completed = 1 AND status IS NULL
+      `);
+    } catch {
+      // 忽略错误
+    }
 
     // 迁移：为已存在的表添加 artifact 列
     try {

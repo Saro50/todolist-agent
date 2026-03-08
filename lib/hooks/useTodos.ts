@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Todo, Tag, SubTask, Workspace } from "@/app/types";
+import { Todo, Tag, SubTask, Workspace, ProcessingStatus } from "@/app/types";
 import { api } from "@/lib/api/client";
 
 interface UseTodosReturn {
@@ -23,6 +23,9 @@ interface UseTodosReturn {
   
   // 产物操作
   updateTodoArtifact: (todoId: string, artifact: string) => Promise<void>;
+  
+  // 状态操作
+  updateTodoStatus: (todoId: string, status: ProcessingStatus) => Promise<void>;
   
   // 子任务操作
   addSubTask: (todoId: string, text: string) => Promise<void>;
@@ -213,6 +216,19 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
+  // 更新任务状态
+  const updateTodoStatus = useCallback(async (id: string, status: ProcessingStatus) => {
+    try {
+      const updated = await api.todos.update(id, { status });
+      setTodos((prev) =>
+        prev.map((t) => (t.id === id ? updated : t))
+      );
+    } catch (err) {
+      console.error("Failed to update todo status:", err);
+      throw err;
+    }
+  }, []);
+
   // 清除已完成
   const clearCompleted = useCallback(async () => {
     try {
@@ -355,6 +371,7 @@ export function useTodos(): UseTodosReturn {
     deleteTodo,
     updateTodoTags,
     updateTodoArtifact,
+    updateTodoStatus,
     clearCompleted,
     createTag,
     addSubTask,

@@ -5,8 +5,8 @@ import { ensureConnected } from "../../db";
 export async function GET() {
   try {
     const db = await ensureConnected();
-    const workspaces = await db.todos.getAllWorkspaces();
-    return NextResponse.json(workspaces);
+    const workspaces = await db.workspaces.findAll();
+    return NextResponse.json(workspaces.map(w => w.path));
   } catch (error) {
     console.error("Failed to fetch workspaces:", error);
     return NextResponse.json(

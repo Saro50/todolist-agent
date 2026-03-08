@@ -15,6 +15,7 @@ export function createTodo(overrides: Partial<Todo> = {}): Todo {
   return {
     id: `todo-${Date.now()}`,
     text: "Test Todo",
+    status: "pending",
     completed: false,
     createdAt: new Date(),
     tagIds: [],

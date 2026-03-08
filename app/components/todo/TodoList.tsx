@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Todo, Tag, TodoStatus, Workspace } from "@/app/types";
+import { Todo, Tag, TodoFilterStatus, Workspace } from "@/app/types";
 import { TodoInput } from "./TodoInput";
 import { TodoItem } from "./TodoItem";
 import { TodoFilter } from "./TodoFilter";
@@ -13,9 +13,10 @@ import { useTaskAnalyzer, TaskAnalysisResult } from "@/lib/hooks/useTaskAnalyzer
 import { TaskAnalysisModal } from "./TaskAnalysisModal";
 import { Folder } from "lucide-react";
 
-const EMPTY_MESSAGES: Record<TodoStatus, { title: string; description: string }> = {
+const EMPTY_MESSAGES: Record<TodoFilterStatus, { title: string; description: string }> = {
   all: { title: "还没有任务", description: "添加一个开始管理吧！" },
-  active: { title: "没有进行中的任务", description: "所有任务都已完成！" },
+  pending: { title: "没有待处理的任务", description: "所有任务都已在进行中或已完成！" },
+  in_progress: { title: "没有进行中的任务", description: "开始处理一些任务吧！" },
   completed: { title: "没有已完成的任务", description: "加油完成一些任务吧！" },
 };
 
@@ -38,6 +39,7 @@ export function TodoList() {
     deleteTodo,
     updateTodoTags,
     updateTodoArtifact,
+    updateTodoStatus,
     clearCompleted,
     createTag,
     addSubTask,
@@ -54,7 +56,7 @@ export function TodoList() {
     refetch,
   } = useTodos();
 
-  const [statusFilter, setStatusFilter] = useState<TodoStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<TodoFilterStatus>("all");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   
@@ -83,11 +85,14 @@ export function TodoList() {
     let result = todos;
 
     switch (statusFilter) {
-      case "active":
-        result = result.filter((todo) => !todo.completed);
+      case "pending":
+        result = result.filter((todo) => todo.status === "pending");
+        break;
+      case "in_progress":
+        result = result.filter((todo) => todo.status === "in_progress");
         break;
       case "completed":
-        result = result.filter((todo) => todo.completed);
+        result = result.filter((todo) => todo.status === "completed");
         break;
     }
 
@@ -103,8 +108,9 @@ export function TodoList() {
   const statusCounts = useMemo(
     () => ({
       all: todos.length,
-      active: todos.filter((t) => !t.completed).length,
-      completed: todos.filter((t) => t.completed).length,
+      pending: todos.filter((t) => t.status === "pending").length,
+      in_progress: todos.filter((t) => t.status === "in_progress").length,
+      completed: todos.filter((t) => t.status === "completed").length,
     }),
     [todos]
   );
@@ -246,6 +252,7 @@ export function TodoList() {
               onUpdateTags={updateTodoTags}
               onCreateTag={createTag}
               onTagClick={handleTagClick}
+              onUpdateStatus={updateTodoStatus}
               onAddSubTask={addSubTask}
               onToggleSubTask={toggleSubTask}
               onDeleteSubTask={deleteSubTask}

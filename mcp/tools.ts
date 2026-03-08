@@ -28,12 +28,14 @@ export const CreateTodoSchema = z.object({
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
   workspace: z.string().optional().describe("工作区路径，默认为根目录/"),
+  status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
 });
 
 export const UpdateTodoSchema = z.object({
   id: z.string().describe("任务ID"),
   text: z.string().min(1).optional().describe("任务内容"),
   completed: z.boolean().optional().describe("完成状态"),
+  status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
   workspace: z.string().optional().describe("工作区路径"),
@@ -127,6 +129,20 @@ export const UpdateSubTaskArtifactSchema = z.object({
   artifact: z.string().describe("产物内容(Markdown格式)"),
 });
 
+// ==================== 搜索工具 ====================
+
+export const SearchTodosSchema = z.object({
+  keyword: z.string().min(1).describe("搜索关键词，支持模糊匹配任务标题"),
+  workspace: z.string().optional().describe("工作区路径，不传则搜索所有工作区"),
+  status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
+});
+
+export const GetTodosByTagSchema = z.object({
+  tagId: z.string().describe("标签ID"),
+  workspace: z.string().optional().describe("工作区路径，不传则搜索所有工作区"),
+  status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
+});
+
 // ==================== 统计工具 ====================
 
 export const GetStatsSchema = z.object({
@@ -160,6 +176,9 @@ export const ToolName = {
   
   UPDATE_TODO_ARTIFACT: "update_todo_artifact",
   UPDATE_SUBTASK_ARTIFACT: "update_subtask_artifact",
+  
+  SEARCH_TODOS: "search_todos",
+  GET_TODOS_BY_TAG: "get_todos_by_tag",
   
   GET_STATS: "get_stats",
 } as const;
@@ -285,6 +304,18 @@ export const toolDefinitions: ToolDefinition[] = [
     name: ToolName.UPDATE_SUBTASK_ARTIFACT,
     description: "更新子任务的产物(Markdown报告)",
     schema: UpdateSubTaskArtifactSchema,
+  },
+  
+  // 搜索
+  {
+    name: ToolName.SEARCH_TODOS,
+    description: "模糊搜索任务标题，支持关键词匹配",
+    schema: SearchTodosSchema,
+  },
+  {
+    name: ToolName.GET_TODOS_BY_TAG,
+    description: "通过标签ID查询任务列表",
+    schema: GetTodosByTagSchema,
   },
   
   // 统计

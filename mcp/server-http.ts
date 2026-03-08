@@ -26,7 +26,13 @@ import {
   handleToggleSubTask,
   handleUpdateTodoArtifact,
   handleUpdateSubTaskArtifact,
+  handleSearchTodos,
+  handleGetTodosByTag,
   handleGetStats,
+  handleGetWorkspaces,
+  handleCreateWorkspace,
+  handleUpdateWorkspace,
+  handleDeleteWorkspace,
 } from "./handlers";
 
 const PORT = process.env.MCP_PORT || "4001";
@@ -44,13 +50,14 @@ const PROTOCOL_VERSION = "2024-11-05";
 const tools: Tool[] = [
   {
     name: "get_todos",
-    description: "获取任务列表，支持按状态和标签筛选",
+    description: "获取任务列表，支持按状态、标签、工作区筛选",
     inputSchema: {
       type: "object",
       properties: {
         status: { type: "string", enum: ["all", "active", "completed"], description: "筛选状态" },
         tagId: { type: "string", description: "按标签ID筛选" },
         includeSubTasks: { type: "boolean", description: "是否包含子任务" },
+        workspace: { type: "string", description: "工作区路径（如 /project-a），不传则获取所有工作区" },
       },
     },
   },
@@ -63,21 +70,25 @@ const tools: Tool[] = [
         text: { type: "string", description: "任务内容" },
         tagIds: { type: "array", items: { type: "string" }, description: "关联的标签ID列表" },
         artifact: { type: "string", description: "产物(Markdown格式)" },
+        workspace: { type: "string", description: "工作区路径（如 /project-a），不传则创建在根目录" },
+        status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "任务处理状态：pending(待处理), in_progress(处理中), completed(已完成)" },
       },
       required: ["text"],
     },
   },
   {
     name: "update_todo",
-    description: "更新任务信息（内容、状态、标签、产物）",
+    description: "更新任务信息（内容、状态、标签、产物、工作区）",
     inputSchema: {
       type: "object",
       properties: {
         id: { type: "string", description: "任务ID" },
         text: { type: "string", description: "新的任务内容" },
         completed: { type: "boolean", description: "完成状态" },
+        status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "任务处理状态：pending(待处理), in_progress(处理中), completed(已完成)" },
         tagIds: { type: "array", items: { type: "string" }, description: "标签ID列表" },
         artifact: { type: "string", description: "Markdown格式的任务产物/报告" },
+        workspace: { type: "string", description: "工作区路径（用于修改任务所属工作区）" },
       },
       required: ["id"],
     },
@@ -234,6 +245,76 @@ const tools: Tool[] = [
     description: "获取任务统计信息",
     inputSchema: { type: "object" },
   },
+  {
+    name: "search_todos",
+    description: "模糊搜索任务标题",
+    inputSchema: {
+      type: "object",
+      properties: {
+        keyword: { type: "string", description: "搜索关键词" },
+        workspace: { type: "string", description: "工作区路径（可选）" },
+        status: { type: "string", enum: ["all", "active", "completed"], description: "筛选状态" },
+      },
+      required: ["keyword"],
+    },
+  },
+  {
+    name: "get_todos_by_tag",
+    description: "通过标签ID查询任务列表",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tagId: { type: "string", description: "标签ID" },
+        workspace: { type: "string", description: "工作区路径（可选）" },
+        status: { type: "string", enum: ["all", "active", "completed"], description: "筛选状态" },
+      },
+      required: ["tagId"],
+    },
+  },
+  {
+    name: "get_workspaces",
+    description: "获取所有工作区列表",
+    inputSchema: { type: "object" },
+  },
+  {
+    name: "create_workspace",
+    description: "创建新工作区",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "工作区名称" },
+        path: { type: "string", description: "工作区路径（可选，自动生成）" },
+        color: { type: "string", enum: ["blue", "emerald", "violet", "rose", "amber", "cyan", "slate"], description: "工作区颜色标识" },
+        id: { type: "string", description: "工作区ID（可选，自动生成）" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "update_workspace",
+    description: "更新工作区信息",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "工作区ID" },
+        name: { type: "string", description: "工作区名称" },
+        path: { type: "string", description: "工作区路径" },
+        color: { type: "string", enum: ["blue", "emerald", "violet", "rose", "amber", "cyan", "slate"], description: "工作区颜色标识" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_workspace",
+    description: "删除工作区（有任务时不可删除）",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "工作区ID" },
+      },
+      required: ["id"],
+    },
+  },
 ];
 
 // 工具处理器映射
@@ -256,7 +337,13 @@ const toolHandlers: Record<string, ToolHandler> = {
   toggle_subtask: handleToggleSubTask,
   update_todo_artifact: handleUpdateTodoArtifact,
   update_subtask_artifact: handleUpdateSubTaskArtifact,
+  search_todos: handleSearchTodos,
+  get_todos_by_tag: handleGetTodosByTag,
   get_stats: handleGetStats,
+  get_workspaces: handleGetWorkspaces,
+  create_workspace: handleCreateWorkspace,
+  update_workspace: handleUpdateWorkspace,
+  delete_workspace: handleDeleteWorkspace,
 };
 
 /**
@@ -349,18 +436,25 @@ export async function startHTTPServer(): Promise<void> {
   // SSE 端点
   app.get("/sse", async (req: Request, res: Response) => {
     const sessionId = Math.random().toString(36).substring(2, 15);
+    const clientIp = req.ip || req.socket.remoteAddress;
+    
+    console.log(`[${new Date().toISOString()}] 🔌 SSE 连接请求 from ${clientIp}`);
     
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // 禁用 Nginx 缓冲
     
-    console.log(`✅ MCP 客户端已连接: ${sessionId}`);
+    console.log(`[${new Date().toISOString()}] ✅ SSE 客户端已连接: ${sessionId}`);
 
     // 发送初始端点信息
+    const messagesEndpoint = `/messages?sessionId=${sessionId}`;
     res.write(`event: endpoint\n`);
-    res.write(`data: /messages?sessionId=${sessionId}\n\n`);
+    res.write(`data: ${messagesEndpoint}\n\n`);
+    
+    console.log(`[${new Date().toISOString()}] 📤 SSE 发送 endpoint: ${messagesEndpoint}`);
 
-    // 保持连接
+    // 保持连接的心跳
     const keepAlive = setInterval(() => {
       res.write(`:keep-alive\n\n`);
     }, 30000);
@@ -368,20 +462,36 @@ export async function startHTTPServer(): Promise<void> {
     // 客户端断开连接
     req.on("close", () => {
       clearInterval(keepAlive);
-      console.log(`👋 MCP 客户端已断开: ${sessionId}`);
+      console.log(`[${new Date().toISOString()}] 👋 SSE 客户端已断开: ${sessionId}`);
+    });
+    
+    // 错误处理
+    req.on("error", (err) => {
+      console.log(`[${new Date().toISOString()}] ❌ SSE 客户端错误: ${sessionId}, ${err.message}`);
+      clearInterval(keepAlive);
     });
   });
 
-  // 消息端点 - JSON-RPC over HTTP
+  // 消息端点 - JSON-RPC over HTTP (用于 SSE 模式)
   app.post("/messages", async (req: Request, res: Response) => {
+    const sessionId = req.query.sessionId as string;
     const request = req.body as JSONRPCRequest;
     
+    console.log(`[${new Date().toISOString()}] 📨 Messages 请求 (session: ${sessionId || 'none'}): ${request?.method}`);
+    
     if (!request || request.jsonrpc !== "2.0") {
+      console.log(`[${new Date().toISOString()}] ❌ 无效的 JSON-RPC 请求`);
       return res.status(400).json(createError(undefined, -32600, "无效的 JSON-RPC 请求"));
     }
 
-    const response = await handleRequest(request);
-    res.json(response);
+    try {
+      const response = await handleRequest(request);
+      console.log(`[${new Date().toISOString()}] ✅ Messages 响应: ${request.method}`);
+      res.json(response);
+    } catch (error) {
+      console.log(`[${new Date().toISOString()}] ❌ Messages 处理错误: ${error}`);
+      res.status(500).json(createError(request.id, -32603, "Internal error"));
+    }
   });
 
   // JSON-RPC 端点（简化版，不通过 SSE）
@@ -411,13 +521,74 @@ export async function startHTTPServer(): Promise<void> {
     res.json({ tools });
   });
 
+  // MCP 初始化端点 - 兼容 MCP 客户端
+  app.get("/mcp", (req: Request, res: Response) => {
+    console.log(`[${new Date().toISOString()}] 📡 MCP 初始化请求 from ${req.ip}`);
+    res.json({
+      name: SERVER_INFO.name,
+      version: SERVER_INFO.version,
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: {
+        tools: {},
+      },
+      endpoints: {
+        sse: `/sse`,
+        messages: `/messages`,
+        rpc: `/rpc`,
+      },
+    });
+  });
+
+  // MCP POST 端点 - 处理 JSON-RPC 请求 (HTTP 模式，无需 SSE)
+  app.post("/mcp", async (req: Request, res: Response) => {
+    const request = req.body as JSONRPCRequest;
+    const clientIp = req.ip || req.socket.remoteAddress;
+    
+    console.log(`[${new Date().toISOString()}] 📨 MCP POST from ${clientIp}: ${request?.method || 'unknown'}`);
+    
+    if (!request || request.jsonrpc !== "2.0") {
+      console.log(`[${new Date().toISOString()}] ❌ 无效的 JSON-RPC 请求: ${JSON.stringify(req.body).substring(0, 100)}`);
+      return res.status(400).json(createError(undefined, -32600, "无效的 JSON-RPC 请求"));
+    }
+
+    try {
+      const response = await handleRequest(request);
+      console.log(`[${new Date().toISOString()}] ✅ MCP 响应: ${request.method}`);
+      res.json(response);
+    } catch (error) {
+      console.log(`[${new Date().toISOString()}] ❌ MCP 处理错误: ${error}`);
+      res.status(500).json(createError(request.id, -32603, `Internal error: ${error}`));
+    }
+  });
+
+  // 404 处理 - 提供有用的错误信息
+  app.use((req: Request, res: Response) => {
+    console.log(`[${new Date().toISOString()}] ⚠️ 未知端点: ${req.method} ${req.path}`);
+    const availableEndpoints = [
+      "GET /mcp - MCP 初始化",
+      "POST /mcp - JSON-RPC 请求",
+      "GET /sse - SSE 连接",
+      "POST /messages - 消息 (SSE 模式)",
+      "GET /health - 健康检查",
+      "GET /tools - 工具列表",
+    ];
+    res.status(404).json({ 
+      error: "Not Found", 
+      path: req.path,
+      message: `端点 ${req.path} 不存在`,
+      availableEndpoints,
+      hint: "Kimi CLI 请配置: { \"mcpServers\": { \"todolist\": { \"url\": \"http://localhost:4001/mcp\" } } }"
+    });
+  });
+
   app.listen(PORT, () => {
     console.log("🚀 TodoList MCP HTTP Server 已启动");
     console.log(`   Port: ${PORT}`);
+    console.log(`   MCP:  http://localhost:${PORT}/mcp  (推荐)`);
     console.log(`   RPC:  http://localhost:${PORT}/rpc`);
+    console.log(`   SSE:  http://localhost:${PORT}/sse`);
     console.log(`   Health: http://localhost:${PORT}/health`);
     console.log(`   Tools: http://localhost:${PORT}/tools`);
-    console.log(`   SSE:  http://localhost:${PORT}/sse`);
     console.log(`   可用工具: ${tools.length} 个`);
   });
 }

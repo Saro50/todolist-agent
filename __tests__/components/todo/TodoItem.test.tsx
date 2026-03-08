@@ -28,6 +28,7 @@ describe("TodoItem", () => {
     onUpdateTags: jest.fn(),
     onCreateTag: jest.fn(),
     onTagClick: jest.fn(),
+    onUpdateStatus: jest.fn(),
   };
 
   beforeEach(() => {

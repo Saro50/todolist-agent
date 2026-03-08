@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { Todo, Tag, SubTask } from "@/app/types";
+import { Todo, Tag, SubTask, ProcessingStatus } from "@/app/types";
 import { Card } from "@/app/components/ui/Card";
 import { Checkbox } from "@/app/components/ui/Checkbox";
 import { Button } from "@/app/components/ui/Button";
@@ -19,6 +19,9 @@ interface TodoItemProps {
   onUpdateTags: (id: string, tagIds: string[]) => void;  // 更新任务标签
   onCreateTag?: (name: string, color: Tag["color"]) => void;  // 创建新标签
   onTagClick?: (tagId: string) => void;  // 点击标签筛选
+  
+  // 状态相关
+  onUpdateStatus: (id: string, status: ProcessingStatus) => Promise<void>;
   
   // 子任务相关
   subTasks?: SubTask[];
@@ -47,6 +50,7 @@ export const TodoItem = memo(function TodoItem({
   onUpdateTags,
   onCreateTag,
   onTagClick,
+  onUpdateStatus,
   subTasks = [],
   onAddSubTask,
   onToggleSubTask,
@@ -65,6 +69,29 @@ export const TodoItem = memo(function TodoItem({
   const hasSubTasks = subTasks.length > 0;
   const completedSubTasks = subTasks.filter((st) => st.completed).length;
   const hasArtifact = !!todo.artifact?.trim();
+
+  // 状态配置
+  const statusConfig: Record<ProcessingStatus, { label: string; color: string; bgColor: string }> = {
+    pending: { label: "待处理", color: "text-amber-600", bgColor: "bg-amber-50" },
+    in_progress: { label: "处理中", color: "text-blue-600", bgColor: "bg-blue-50" },
+    completed: { label: "已完成", color: "text-green-600", bgColor: "bg-green-50" },
+  };
+
+  // 格式化创建时间
+  const formatCreatedAt = (date: Date) => {
+    const d = new Date(date);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "刚刚";
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 7) return `${diffDays}天前`;
+    return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  };
 
   return (
     <Card
@@ -87,6 +114,28 @@ export const TodoItem = memo(function TodoItem({
           )}
         >
           {todo.text}
+        </span>
+
+        {/* 状态选择器 */}
+        <select
+          value={todo.status}
+          onChange={(e) => onUpdateStatus(todo.id, e.target.value as ProcessingStatus)}
+          className={cn(
+            "text-xs px-2 py-1 rounded-full border-0 cursor-pointer",
+            "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-300",
+            "transition-colors duration-200",
+            statusConfig[todo.status].bgColor,
+            statusConfig[todo.status].color
+          )}
+        >
+          <option value="pending">待处理</option>
+          <option value="in_progress">处理中</option>
+          <option value="completed">已完成</option>
+        </select>
+
+        {/* 创建时间 */}
+        <span className="text-xs text-gray-400 whitespace-nowrap">
+          {formatCreatedAt(todo.createdAt)}
         </span>
 
         {/* 产物徽章 */}

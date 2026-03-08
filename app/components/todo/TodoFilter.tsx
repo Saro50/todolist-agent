@@ -1,17 +1,18 @@
 "use client";
 
-import { TodoStatus, Tag } from "@/app/types";
+import { TodoFilterStatus, Tag } from "@/app/types";
 import { FilterTabs } from "@/app/components/ui/FilterTabs";
 import { Tag as TagComponent } from "@/app/components/ui/Tag";
 import { cn } from "@/lib/utils";
 
 interface TodoFilterProps {
   // 状态筛选
-  currentStatus: TodoStatus;
-  onStatusChange: (status: TodoStatus) => void;
+  currentStatus: TodoFilterStatus;
+  onStatusChange: (status: TodoFilterStatus) => void;
   statusCounts: {
     all: number;
-    active: number;
+    pending: number;
+    in_progress: number;
     completed: number;
   };
   // 标签筛选
@@ -20,9 +21,10 @@ interface TodoFilterProps {
   availableTags: Tag[];
 }
 
-const STATUS_OPTIONS: { key: TodoStatus; label: string }[] = [
+const STATUS_OPTIONS: { key: TodoFilterStatus; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "active", label: "进行中" },
+  { key: "pending", label: "待处理" },
+  { key: "in_progress", label: "处理中" },
   { key: "completed", label: "已完成" },
 ];
 

@@ -125,7 +125,7 @@ export function WorkspaceManager({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm pt-[100px]">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">

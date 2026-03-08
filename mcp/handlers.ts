@@ -8,9 +8,12 @@
 
 import { api } from "./api";
 // 类型定义内联
+type ProcessingStatus = "pending" | "in_progress" | "completed";
+
 type Todo = {
   id: string;
   text: string;
+  status: ProcessingStatus;
   completed: boolean;
   createdAt: Date;
   tagIds: string[];
@@ -64,6 +67,8 @@ import {
   ToggleSubTaskSchema,
   UpdateTodoArtifactSchema,
   UpdateSubTaskArtifactSchema,
+  SearchTodosSchema,
+  GetTodosByTagSchema,
   GetStatsSchema,
 } from "./tools";
 import { z } from "zod";
@@ -84,13 +89,23 @@ export type ToolResult = CallToolResult;
 // ==================== 格式化函数 ====================
 
 function formatTodo(todo: Todo, subTasks: SubTask[] = []): string {
-  const status = todo.completed ? "✅" : "⬜";
+  const completedIcon = todo.completed ? "✅" : "⬜";
+  const statusIcon: Record<ProcessingStatus, string> = {
+    pending: "⏳",
+    in_progress: "🔄",
+    completed: "✅",
+  };
+  const statusText: Record<ProcessingStatus, string> = {
+    pending: "待处理",
+    in_progress: "处理中",
+    completed: "已完成",
+  };
   const tags = todo.tagIds.length > 0 ? ` [${todo.tagIds.join(", ")}]` : "";
   const artifact = todo.artifact ? " 📄" : "";
   const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
   
-  let result = `${status} ${todo.text}${tags}${artifact}${workspace}\n`;
-  result += `   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}\n`;
+  let result = `${completedIcon} ${todo.text}${tags}${artifact}${workspace}\n`;
+  result += `   ID: ${todo.id} | 状态: ${statusIcon[todo.status]} ${statusText[todo.status]} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}\n`;
   
   if (subTasks.length > 0) {
     result += `   子任务: ${subTasks.filter(st => st.completed).length}/${subTasks.length} 完成\n`;
@@ -148,8 +163,8 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
   try {
     const params = GetTodosSchema.parse(args || {});
     
-    // 优先使用参数指定的工作区，否则使用当前工作区
-    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    // 使用参数指定的工作区，不传则获取所有工作区的任务
+    const workspace = params.workspace;
     
     let todos: Todo[];
     if (params.status === "active") {
@@ -190,14 +205,15 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
 export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
   try {
     const params = CreateTodoSchema.parse(args || {});
-    // 优先使用参数指定的工作区，否则使用当前工作区
-    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    // 使用参数指定的工作区，不传则创建在根目录
+    const workspacePath = params.workspace || "/";
     
     const todo = await api.todos.create({
       text: params.text,
       tagIds: params.tagIds || [],
       artifact: params.artifact,
-      workspacePath: workspace,
+      workspacePath,
+      status: params.status,
     });
     
     return {
@@ -501,12 +517,118 @@ export async function handleUpdateSubTaskArtifact(args: unknown): Promise<ToolRe
   }
 }
 
+// ==================== 搜索处理器 ====================
+
+export async function handleSearchTodos(args: unknown): Promise<ToolResult> {
+  try {
+    const params = SearchTodosSchema.parse(args || {});
+    const keyword = params.keyword.toLowerCase();
+    
+    // 获取任务（按工作区筛选）
+    let todos = await api.todos.getAll(params.workspace);
+    
+    // 按关键词模糊匹配标题
+    todos = todos.filter(todo => todo.text.toLowerCase().includes(keyword));
+    
+    // 按状态筛选
+    if (params.status === "active") {
+      todos = todos.filter(t => !t.completed);
+    } else if (params.status === "completed") {
+      todos = todos.filter(t => t.completed);
+    }
+    
+    // 获取标签信息用于显示
+    const tags = await api.tags.getAll();
+    const tagMap = new Map(tags.map(t => [t.id, t]));
+
+    if (todos.length === 0) {
+      return { 
+        content: [{ 
+          type: "text", 
+          text: `🔍 搜索 "${params.keyword}" 没有匹配的任务` 
+        }] 
+      };
+    }
+
+    const wsHeader = params.workspace ? ` [工作区: ${params.workspace}]` : "";
+    const lines = [`🔍 搜索结果 "${params.keyword}"${wsHeader} (${todos.length}项)\n`];
+    
+    for (const todo of todos) {
+      const status = todo.completed ? "✅" : "⬜";
+      const tagNames = todo.tagIds.map(id => tagMap.get(id)?.name || id).join(", ");
+      const tags = tagNames ? ` [${tagNames}]` : "";
+      const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
+      lines.push(`${status} ${todo.text}${tags}${workspace}`);
+      lines.push(`   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}`);
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
+  try {
+    const params = GetTodosByTagSchema.parse(args || {});
+    
+    // 获取标签信息
+    const tags = await api.tags.getAll();
+    const tag = tags.find(t => t.id === params.tagId);
+    
+    if (!tag) {
+      return { 
+        content: [{ 
+          type: "text", 
+          text: `❌ 标签不存在: ${params.tagId}\n可用标签:\n${tags.map(t => `- ${t.name} (ID: ${t.id})`).join("\n")}` 
+        }],
+        isError: true
+      };
+    }
+    
+    // 获取任务
+    let todos = await api.todos.getByTag(params.tagId, params.workspace);
+    
+    // 按状态筛选
+    if (params.status === "active") {
+      todos = todos.filter(t => !t.completed);
+    } else if (params.status === "completed") {
+      todos = todos.filter(t => t.completed);
+    }
+
+    if (todos.length === 0) {
+      const wsText = params.workspace ? ` (工作区: ${params.workspace})` : "";
+      return { 
+        content: [{ 
+          type: "text", 
+          text: `🏷️ 标签 "${tag.name}"${wsText} 下暂无任务` 
+        }] 
+      };
+    }
+
+    const wsHeader = params.workspace ? ` [工作区: ${params.workspace}]` : "";
+    const lines = [`🏷️ 标签 "${tag.name}"${wsHeader} (${todos.length}项)\n`];
+    
+    for (const todo of todos) {
+      const status = todo.completed ? "✅" : "⬜";
+      const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
+      lines.push(`${status} ${todo.text}${workspace}`);
+      lines.push(`   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}`);
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
 // ==================== 统计处理器 ====================
 
 export async function handleGetStats(args: unknown): Promise<ToolResult> {
   try {
     const params = GetStatsSchema.parse(args || {});
-    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    // 使用参数指定的工作区，不传则统计所有工作区
+    const workspace = params.workspace;
     
     const [todos, tags] = await Promise.all([
       api.todos.getAll(workspace),
@@ -571,6 +693,9 @@ export const toolHandlers: Record<ToolName, (args: unknown) => Promise<ToolResul
   
   [ToolName.UPDATE_TODO_ARTIFACT]: handleUpdateTodoArtifact,
   [ToolName.UPDATE_SUBTASK_ARTIFACT]: handleUpdateSubTaskArtifact,
+  
+  [ToolName.SEARCH_TODOS]: handleSearchTodos,
+  [ToolName.GET_TODOS_BY_TAG]: handleGetTodosByTag,
   
   [ToolName.GET_STATS]: handleGetStats,
 };

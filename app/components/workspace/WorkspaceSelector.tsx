@@ -3,7 +3,7 @@
 import React, { useState, useCallback } from "react";
 import { Folder, Plus, X } from "lucide-react";
 
-interface WorkspaceSelectorProps {
+export interface WorkspaceSelectorProps {
   /** 当前选中的工作区 */
   currentWorkspace: string;
   /** 所有可用的工作区列表 */

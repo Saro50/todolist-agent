@@ -36,9 +36,13 @@ export async function POST(request: NextRequest) {
     const db = await ensureConnected();
     const data = await request.json();
 
+    // 确定状态：优先使用传入的 status，否则根据 completed 计算
+    const status = data.status || (data.completed ? "completed" : "pending");
+    
     const todo = await db.todos.create({
       text: data.text,
-      completed: data.completed ?? false,
+      status,
+      completed: status === "completed",
       tagIds: data.tagIds || [],
       workspacePath: data.workspacePath || "/",
     });
