@@ -18,8 +18,12 @@ import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput } from "@/ap
 class MockTodoRepository implements ITodoRepository {
   private todos: Todo[] = [];
 
-  async findAll(): Promise<Todo[]> {
-    return [...this.todos].sort(
+  async findAll(workspacePath?: string): Promise<Todo[]> {
+    let result = [...this.todos];
+    if (workspacePath) {
+      result = result.filter(t => t.workspacePath === workspacePath);
+    }
+    return result.sort(
       (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
     );
   }
@@ -28,15 +32,25 @@ class MockTodoRepository implements ITodoRepository {
     return this.todos.find((t) => t.id === id) || null;
   }
 
-  async findByTag(tagId: string): Promise<Todo[]> {
-    return this.todos
-      .filter((t) => t.tagIds.includes(tagId))
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+    let result = this.todos.filter((t) => t.tagIds.includes(tagId));
+    if (workspacePath) {
+      result = result.filter(t => t.workspacePath === workspacePath);
+    }
+    return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  async findByStatus(completed: boolean): Promise<Todo[]> {
+  async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+    let result = this.todos.filter((t) => t.completed === completed);
+    if (workspacePath) {
+      result = result.filter(t => t.workspacePath === workspacePath);
+    }
+    return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async findByWorkspace(workspacePath: string): Promise<Todo[]> {
     return this.todos
-      .filter((t) => t.completed === completed)
+      .filter((t) => t.workspacePath === workspacePath)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
@@ -47,6 +61,7 @@ class MockTodoRepository implements ITodoRepository {
       completed: data.completed,
       tagIds: data.tagIds || [],
       artifact: data.artifact,
+      workspacePath: data.workspacePath || "/",
       createdAt: new Date(),
     };
     this.todos.push(todo);
@@ -74,9 +89,17 @@ class MockTodoRepository implements ITodoRepository {
     return initialLength - this.todos.length;
   }
 
-  async clearCompleted(): Promise<number> {
-    const completed = this.todos.filter((t) => t.completed);
+  async clearCompleted(workspacePath?: string): Promise<number> {
+    let completed = this.todos.filter((t) => t.completed);
+    if (workspacePath) {
+      completed = completed.filter(t => t.workspacePath === workspacePath);
+    }
     return this.batchDelete(completed.map((t) => t.id));
+  }
+
+  async getAllWorkspaces(): Promise<string[]> {
+    const workspaces = new Set(this.todos.map(t => t.workspacePath || "/"));
+    return Array.from(workspaces).sort();
   }
 
   async addTag(todoId: string, tagId: string): Promise<boolean> {

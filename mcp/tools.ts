@@ -20,12 +20,14 @@ export const GetTodosSchema = z.object({
   status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
   tagId: z.string().optional().describe("按标签筛选"),
   includeSubTasks: z.boolean().optional().describe("是否包含子任务"),
+  workspace: z.string().optional().describe("工作区路径，不传则获取所有工作区的任务"),
 });
 
 export const CreateTodoSchema = z.object({
   text: z.string().min(1).describe("任务内容"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
+  workspace: z.string().optional().describe("工作区路径，默认为根目录/"),
 });
 
 export const UpdateTodoSchema = z.object({
@@ -34,6 +36,7 @@ export const UpdateTodoSchema = z.object({
   completed: z.boolean().optional().describe("完成状态"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
+  workspace: z.string().optional().describe("工作区路径"),
 });
 
 export const DeleteTodoSchema = z.object({
@@ -42,6 +45,28 @@ export const DeleteTodoSchema = z.object({
 
 export const ToggleTodoSchema = z.object({
   id: z.string().describe("任务ID"),
+});
+
+// ==================== 工作区工具 ====================
+
+export const GetWorkspacesSchema = z.object({});
+
+export const CreateWorkspaceSchema = z.object({
+  name: z.string().min(1).describe("工作区名称"),
+  path: z.string().optional().describe("工作区路径，不指定则自动生成"),
+  color: z.enum(["blue", "emerald", "violet", "rose", "amber", "cyan", "slate"]).optional().describe("工作区颜色标识"),
+  id: z.string().optional().describe("工作区ID，不指定则自动生成"),
+});
+
+export const UpdateWorkspaceSchema = z.object({
+  id: z.string().describe("工作区ID"),
+  name: z.string().min(1).optional().describe("工作区名称"),
+  path: z.string().optional().describe("工作区路径"),
+  color: z.enum(["blue", "emerald", "violet", "rose", "amber", "cyan", "slate"]).optional().describe("工作区颜色标识"),
+});
+
+export const DeleteWorkspaceSchema = z.object({
+  id: z.string().describe("工作区ID"),
 });
 
 // ==================== 标签工具 ====================
@@ -104,7 +129,9 @@ export const UpdateSubTaskArtifactSchema = z.object({
 
 // ==================== 统计工具 ====================
 
-export const GetStatsSchema = z.object({});
+export const GetStatsSchema = z.object({
+  workspace: z.string().optional().describe("工作区路径，不传则统计所有工作区"),
+});
 
 // ==================== 工具名称常量 ====================
 
@@ -114,6 +141,11 @@ export const ToolName = {
   UPDATE_TODO: "update_todo",
   DELETE_TODO: "delete_todo",
   TOGGLE_TODO: "toggle_todo",
+  
+  GET_WORKSPACES: "get_workspaces",
+  CREATE_WORKSPACE: "create_workspace",
+  UPDATE_WORKSPACE: "update_workspace",
+  DELETE_WORKSPACE: "delete_workspace",
   
   GET_TAGS: "get_tags",
   CREATE_TAG: "create_tag",
@@ -148,17 +180,17 @@ export const toolDefinitions: ToolDefinition[] = [
   // Todo 管理
   {
     name: ToolName.GET_TODOS,
-    description: "获取任务列表，支持按状态和标签筛选",
+    description: "获取任务列表，支持按状态、标签筛选，可通过 workspace 参数指定工作区路径",
     schema: GetTodosSchema,
   },
   {
     name: ToolName.CREATE_TODO,
-    description: "创建新任务",
+    description: "创建新任务，使用 workspace 参数指定工作区路径（如 /project-a），不指定则创建在根目录",
     schema: CreateTodoSchema,
   },
   {
     name: ToolName.UPDATE_TODO,
-    description: "更新任务信息（内容、状态、标签、产物）",
+    description: "更新任务信息，可通过 workspace 参数修改任务所属工作区",
     schema: UpdateTodoSchema,
   },
   {
@@ -170,6 +202,28 @@ export const toolDefinitions: ToolDefinition[] = [
     name: ToolName.TOGGLE_TODO,
     description: "切换任务完成状态",
     schema: ToggleTodoSchema,
+  },
+  
+  // 工作区管理
+  {
+    name: ToolName.GET_WORKSPACES,
+    description: "获取所有工作区列表",
+    schema: GetWorkspacesSchema,
+  },
+  {
+    name: ToolName.CREATE_WORKSPACE,
+    description: "创建新工作区",
+    schema: CreateWorkspaceSchema,
+  },
+  {
+    name: ToolName.UPDATE_WORKSPACE,
+    description: "更新工作区信息",
+    schema: UpdateWorkspaceSchema,
+  },
+  {
+    name: ToolName.DELETE_WORKSPACE,
+    description: "删除工作区（有任务时不可删除）",
+    schema: DeleteWorkspaceSchema,
   },
   
   // 标签管理
@@ -236,7 +290,7 @@ export const toolDefinitions: ToolDefinition[] = [
   // 统计
   {
     name: ToolName.GET_STATS,
-    description: "获取任务统计信息",
+    description: "获取任务统计信息，可指定 workspace 参数按工作区统计",
     schema: GetStatsSchema,
   },
 ];

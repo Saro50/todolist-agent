@@ -1,18 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Todo, Tag, SubTask } from "@/app/types";
+import { Todo, Tag, SubTask, Workspace } from "@/app/types";
 import { api } from "@/lib/api/client";
 
 interface UseTodosReturn {
   todos: Todo[];
   tags: Tag[];
-  subTasks: Record<string, SubTask[]>;  // 按任务 ID 分组的子任务
+  subTasks: Record<string, SubTask[]>;
   isLoading: boolean;
   error: string | null;
+  currentWorkspace: Workspace;
+  workspaces: Workspace[];
   
   // 操作函数
-  addTodo: (text: string, tagIds: string[]) => Promise<void>;
+  addTodo: (text: string, tagIds: string[], workspacePath?: string) => Promise<void>;
   toggleTodo: (id: string) => Promise<void>;
   deleteTodo: (id: string) => Promise<void>;
   updateTodoTags: (id: string, tagIds: string[]) => Promise<void>;
@@ -30,30 +32,56 @@ interface UseTodosReturn {
   updateSubTaskArtifact: (subTaskId: string, artifact: string) => Promise<void>;
   loadSubTasks: (todoId: string) => Promise<void>;
   
+  // 工作区操作
+  switchWorkspace: (workspace: Workspace) => void;
+  createWorkspace: (data: { name: string; color?: string }) => Promise<void>;
+  updateWorkspace: (id: string, data: Partial<Workspace>) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
+  refreshWorkspaces: () => Promise<void>;
+  
   // 重新加载
   refetch: () => Promise<void>;
 }
 
-/**
- * Todo 数据管理 Hook
- * 
- * 通过 API 与后端数据库交互
- */
+const ROOT_WORKSPACE: Workspace = {
+  id: "root",
+  name: "根目录",
+  path: "/",
+  color: "slate",
+  createdAt: new Date(),
+};
+
 export function useTodos(): UseTodosReturn {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [subTasks, setSubTasks] = useState<Record<string, SubTask[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(ROOT_WORKSPACE);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([ROOT_WORKSPACE]);
+
+  // 加载工作区列表
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const workspacesData = await api.workspaces.getAll();
+      setWorkspaces(workspacesData.length > 0 ? workspacesData : [ROOT_WORKSPACE]);
+      return workspacesData;
+    } catch (err) {
+      console.error("Failed to load workspaces:", err);
+      return [ROOT_WORKSPACE];
+    }
+  }, []);
 
   // 加载数据
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (workspace?: Workspace) => {
     try {
       setIsLoading(true);
       setError(null);
       
+      const targetWorkspace = workspace ?? currentWorkspace;
+      
       const [todosData, tagsData] = await Promise.all([
-        api.todos.getAll(),
+        api.todos.getAll(targetWorkspace.path),
         api.tags.getAll(),
       ]);
       
@@ -65,23 +93,67 @@ export function useTodos(): UseTodosReturn {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentWorkspace]);
 
   // 初始加载
   useEffect(() => {
+    loadWorkspaces();
     loadData();
+  }, [loadData, loadWorkspaces]);
+
+  // 切换工作区
+  const switchWorkspace = useCallback((workspace: Workspace) => {
+    setCurrentWorkspace(workspace);
+    loadData(workspace);
   }, [loadData]);
 
+  // 创建工作区
+  const createWorkspace = useCallback(async (data: { name: string; color?: string }) => {
+    await api.workspaces.create(data);
+    await loadWorkspaces();
+  }, [loadWorkspaces]);
+
+  // 更新工作区
+  const updateWorkspace = useCallback(async (id: string, data: Partial<Workspace>) => {
+    await api.workspaces.update(id, data);
+    await loadWorkspaces();
+    // 如果更新的是当前工作区，刷新当前工作区数据
+    if (id === currentWorkspace.id) {
+      const updated = await api.workspaces.getById(id);
+      setCurrentWorkspace(updated);
+    }
+  }, [loadWorkspaces, currentWorkspace.id]);
+
+  // 删除工作区
+  const deleteWorkspace = useCallback(async (id: string) => {
+    await api.workspaces.delete(id);
+    await loadWorkspaces();
+    // 如果删除的是当前工作区，切换到根目录
+    if (id === currentWorkspace.id) {
+      setCurrentWorkspace(ROOT_WORKSPACE);
+      await loadData(ROOT_WORKSPACE);
+    }
+  }, [loadWorkspaces, currentWorkspace.id, loadData]);
+
+  // 刷新工作区列表
+  const refreshWorkspaces = useCallback(async () => {
+    await loadWorkspaces();
+  }, [loadWorkspaces]);
+
   // 添加任务
-  const addTodo = useCallback(async (text: string, tagIds: string[]) => {
+  const addTodo = useCallback(async (text: string, tagIds: string[], workspacePath?: string) => {
     try {
-      const newTodo = await api.todos.create({ text, tagIds });
-      setTodos((prev) => [newTodo, ...prev]);
+      const targetPath = workspacePath ?? currentWorkspace.path;
+      const newTodo = await api.todos.create({ text, tagIds, workspacePath: targetPath });
+      
+      if (newTodo.workspacePath === currentWorkspace.path) {
+        setTodos((prev) => [newTodo, ...prev]);
+      }
     } catch (err) {
       console.error("Failed to add todo:", err);
       throw err;
     }
-  }, []);
+  }, [currentWorkspace.path]);
 
   // 切换任务状态
   const toggleTodo = useCallback(async (id: string) => {
@@ -104,7 +176,6 @@ export function useTodos(): UseTodosReturn {
     try {
       await api.todos.delete(id);
       setTodos((prev) => prev.filter((t) => t.id !== id));
-      // 同时删除关联的子任务
       setSubTasks((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -145,12 +216,10 @@ export function useTodos(): UseTodosReturn {
   // 清除已完成
   const clearCompleted = useCallback(async () => {
     try {
-      // 获取所有已完成的任务 ID
       const completedIds = todos
         .filter((t) => t.completed)
         .map((t) => t.id);
       
-      // 逐个删除
       await Promise.all(completedIds.map((id) => api.todos.delete(id)));
       
       setTodos((prev) => prev.filter((t) => !t.completed));
@@ -172,9 +241,7 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // ==================== 子任务操作 ====================
-
-  // 加载子任务
+  // 子任务操作
   const loadSubTasks = useCallback(async (todoId: string) => {
     try {
       const subTasksData = await api.subTasks.getByTodoId(todoId);
@@ -188,7 +255,6 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 添加子任务
   const addSubTask = useCallback(async (todoId: string, text: string) => {
     try {
       const newSubTask = await api.subTasks.create(todoId, text);
@@ -202,7 +268,6 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 切换子任务状态
   const toggleSubTask = useCallback(async (subTaskId: string, completed: boolean) => {
     try {
       const updated = await api.subTasks.update(subTaskId, { completed });
@@ -222,7 +287,6 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 删除子任务
   const deleteSubTask = useCallback(async (subTaskId: string) => {
     try {
       await api.subTasks.delete(subTaskId);
@@ -240,7 +304,6 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 更新子任务文本
   const updateSubTask = useCallback(async (subTaskId: string, text: string) => {
     try {
       const updated = await api.subTasks.update(subTaskId, { text });
@@ -260,7 +323,6 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
-  // 更新子任务产物
   const updateSubTaskArtifact = useCallback(async (subTaskId: string, artifact: string) => {
     try {
       const updated = await api.subTasks.update(subTaskId, { artifact });
@@ -286,6 +348,8 @@ export function useTodos(): UseTodosReturn {
     subTasks,
     isLoading,
     error,
+    currentWorkspace,
+    workspaces,
     addTodo,
     toggleTodo,
     deleteTodo,
@@ -299,6 +363,11 @@ export function useTodos(): UseTodosReturn {
     updateSubTask,
     updateSubTaskArtifact,
     loadSubTasks,
+    switchWorkspace,
+    createWorkspace,
+    updateWorkspace,
+    deleteWorkspace,
+    refreshWorkspaces,
     refetch: loadData,
   };
 }

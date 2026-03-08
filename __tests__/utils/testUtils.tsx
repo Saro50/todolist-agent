@@ -20,6 +20,7 @@ export function createTodo(overrides: Partial<Todo> = {}): Todo {
     tagIds: [],
     subTasks: [],
     artifact: undefined,
+    workspacePath: "/",  // 默认工作目录
     ...overrides,
   };
 }

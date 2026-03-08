@@ -8,7 +8,7 @@
  * 4. 统一错误处理
  */
 
-import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
+import { Todo, Tag, SubTask, Workspace, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
 
 // 数据库连接配置
 export interface DatabaseConfig {
@@ -40,10 +40,11 @@ export interface TransactionContext {
  */
 export interface ITodoRepository {
   // 查询
-  findAll(): Promise<Todo[]>;
+  findAll(workspacePath?: string): Promise<Todo[]>;
   findById(id: string): Promise<Todo | null>;
-  findByTag(tagId: string): Promise<Todo[]>;
-  findByStatus(completed: boolean): Promise<Todo[]>;
+  findByTag(tagId: string, workspacePath?: string): Promise<Todo[]>;
+  findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]>;
+  findByWorkspace(workspacePath: string): Promise<Todo[]>;
   
   // 增删改
   create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo>;
@@ -52,7 +53,7 @@ export interface ITodoRepository {
   
   // 批量操作
   batchDelete(ids: string[]): Promise<number>;
-  clearCompleted(): Promise<number>;
+  clearCompleted(workspacePath?: string): Promise<number>;
   
   // 标签关联
   addTag(todoId: string, tagId: string): Promise<boolean>;
@@ -61,6 +62,28 @@ export interface ITodoRepository {
   
   // 产物操作
   updateArtifact(todoId: string, artifact: string | null): Promise<boolean>;
+  
+}
+
+/**
+ * 工作区数据访问接口
+ */
+export interface IWorkspaceRepository {
+  // 查询
+  findAll(): Promise<Workspace[]>;
+  findById(id: string): Promise<Workspace | null>;
+  findByPath(path: string): Promise<Workspace | null>;
+  
+  // 增删改
+  create(workspace: Omit<Workspace, "id" | "createdAt"> & { id?: string }): Promise<Workspace>;
+  update(id: string, data: Partial<Omit<Workspace, "id">>): Promise<Workspace | null>;
+  delete(id: string): Promise<boolean>;
+  
+  // 获取工作区任务数量
+  getTodoCount(id: string): Promise<number>;
+  
+  // 路径生成
+  generateUniquePath(name: string): Promise<string>;
 }
 
 /**
@@ -123,6 +146,7 @@ export interface IDatabase {
   todos: ITodoRepository;
   tags: ITagRepository;
   subTasks: ISubTaskRepository;
+  workspaces: IWorkspaceRepository;
   
   // 事务支持
   transaction<T>(callback: (tx: TransactionContext) => Promise<T>): Promise<T>;

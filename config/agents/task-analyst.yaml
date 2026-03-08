@@ -27,6 +27,8 @@ agent:
     - "kimi_cli.tools.web:SearchWeb"    # 任务分析不需要网络搜索
     - "kimi_cli.tools.web:FetchURL"     # 任务分析不需要抓取网页
     - "kimi_cli.tools.file:ReadMediaFile"  # 不需要读取媒体文件
+    - "kimi_cli.tools.file:ReadMediaFile"  # 不需要读取媒体文件
+    - "kimi_cli.tools.file:WriteFile"
   
   # 子 Agent 定义
   # subagents:

@@ -21,12 +21,23 @@ jest.mock("@/lib/api/client", () => ({
       getAll: jest.fn(),
       create: jest.fn(),
     },
+    workspaces: {
+      getAll: jest.fn(),
+      getById: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    },
   },
 }));
 
 describe("useTodos", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Default mock for workspaces.getAll
+    (api.workspaces.getAll as jest.Mock).mockResolvedValue([
+      { id: "root", name: "根目录", path: "/", color: "slate", createdAt: new Date() }
+    ]);
   });
 
   it("should load todos and tags on mount", async () => {
@@ -77,6 +88,7 @@ describe("useTodos", () => {
     expect(api.todos.create).toHaveBeenCalledWith({
       text: "New Todo",
       tagIds: ["tag-1"],
+      workspacePath: "/",  // 默认使用当前工作目录
     });
     
     // 等待状态更新
@@ -224,5 +236,80 @@ describe("useTodos", () => {
       expect(result.current.todos.length).toBe(1);
     });
     expect(result.current.todos[0].text).toBe("Refetched");
+  });
+
+  describe("workspace support", () => {
+    it("should default to root workspace", async () => {
+      (api.todos.getAll as jest.Mock).mockResolvedValue([]);
+      (api.tags.getAll as jest.Mock).mockResolvedValue([]);
+
+      const { result } = renderHook(() => useTodos());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(result.current.currentWorkspace.id).toBe("root");
+      expect(result.current.currentWorkspace.path).toBe("/");
+      expect(result.current.workspaces.length).toBe(1);
+    });
+
+    it("should load todos for specific workspace", async () => {
+      const workspaceTodos = [createTodo({ text: "Workspace Todo" })];
+      
+      (api.todos.getAll as jest.Mock).mockResolvedValue(workspaceTodos);
+      (api.tags.getAll as jest.Mock).mockResolvedValue([]);
+
+      const { result } = renderHook(() => useTodos());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      // Should call getAll with current workspace path
+      expect(api.todos.getAll).toHaveBeenCalledWith("/");
+    });
+
+    it("should switch workspace", async () => {
+      const rootTodos = [createTodo({ id: "1", text: "Root Todo" })];
+      const projectTodos = [createTodo({ id: "2", text: "Project Todo" })];
+      const projectWorkspace = { id: "project", name: "Project", path: "/project", color: "blue", createdAt: new Date() };
+      
+      (api.todos.getAll as jest.Mock)
+        .mockResolvedValueOnce(rootTodos)
+        .mockResolvedValueOnce(projectTodos);
+      (api.tags.getAll as jest.Mock).mockResolvedValue([]);
+
+      const { result } = renderHook(() => useTodos());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      // Switch to project workspace
+      await act(async () => {
+        result.current.switchWorkspace(projectWorkspace);
+      });
+
+      await waitFor(() => {
+        expect(result.current.currentWorkspace.id).toBe("project");
+      });
+
+      // Should call getAll with new workspace path
+      expect(api.todos.getAll).toHaveBeenLastCalledWith("/project");
+    });
+
+    it("should add todo to specific workspace", async () => {
+      const newTodo = createTodo({ text: "Project Task", workspacePath: "/my-project" });
+      
+      (api.todos.getAll as jest.Mock).mockResolvedValue([]);
+      (api.tags.getAll as jest.Mock).mockResolvedValue([]);
+      (api.todos.create as jest.Mock).mockResolvedValue(newTodo);
+
+      const { result } = renderHook(() => useTodos());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      await act(async () => {
+        await result.current.addTodo("Project Task", [], "/my-project");
+      });
+
+      expect(api.todos.create).toHaveBeenCalledWith({
+        text: "Project Task",
+        tagIds: [],
+        workspacePath: "/my-project",
+      });
+    });
   });
 });

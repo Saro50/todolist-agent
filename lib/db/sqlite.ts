@@ -12,7 +12,8 @@ import Database from "better-sqlite3";
 import { 
   Todo, 
   Tag, 
-  SubTask, 
+  SubTask,
+  Workspace,
   CreateSubTaskInput, 
   UpdateSubTaskInput 
 } from "@/app/types";
@@ -21,6 +22,7 @@ import {
   ITodoRepository,
   ITagRepository,
   ISubTaskRepository,
+  IWorkspaceRepository,
   TransactionContext,
   DatabaseConfig,
   ConnectionError,
@@ -32,16 +34,23 @@ import {
 class SQLiteTodoRepository implements ITodoRepository {
   constructor(private db: Database.Database) {}
 
-  async findAll(): Promise<Todo[]> {
-    const stmt = this.db.prepare(`
+  async findAll(workspacePath?: string): Promise<Todo[]> {
+    let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
-      GROUP BY t.id
-      ORDER BY t.created_at DESC
-    `);
+    `;
+    const params: any[] = [];
     
-    const rows = stmt.all() as any[];
+    if (workspacePath) {
+      sql += ` WHERE t.workspace_path = ?`;
+      params.push(workspacePath);
+    }
+    
+    sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
+    
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
     return rows.map(this.rowToTodo);
   }
 
@@ -58,44 +67,80 @@ class SQLiteTodoRepository implements ITodoRepository {
     return row ? this.rowToTodo(row) : null;
   }
 
-  async findByTag(tagId: string): Promise<Todo[]> {
-    const stmt = this.db.prepare(`
+  async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+    let sql = `
       SELECT t.*, GROUP_CONCAT(tt2.tag_id) as tag_ids
       FROM todos t
       INNER JOIN todo_tags tt ON t.id = tt.todo_id AND tt.tag_id = ?
       LEFT JOIN todo_tags tt2 ON t.id = tt2.todo_id
-      GROUP BY t.id
-      ORDER BY t.created_at DESC
-    `);
+    `;
+    const params: any[] = [tagId];
     
-    const rows = stmt.all(tagId) as any[];
+    if (workspacePath) {
+      sql += ` WHERE t.workspace_path = ?`;
+      params.push(workspacePath);
+    }
+    
+    sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
+    
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
     return rows.map(this.rowToTodo);
   }
 
-  async findByStatus(completed: boolean): Promise<Todo[]> {
-    const stmt = this.db.prepare(`
+  async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+    let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
       WHERE t.completed = ?
+    `;
+    const params: any[] = [completed ? 1 : 0];
+    
+    if (workspacePath) {
+      sql += ` AND t.workspace_path = ?`;
+      params.push(workspacePath);
+    }
+    
+    sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
+    
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+    return rows.map(this.rowToTodo);
+  }
+
+  async findByWorkspace(workspacePath: string): Promise<Todo[]> {
+    const stmt = this.db.prepare(`
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      WHERE t.workspace_path = ?
       GROUP BY t.id
       ORDER BY t.created_at DESC
     `);
     
-    const rows = stmt.all(completed ? 1 : 0) as any[];
+    const rows = stmt.all(workspacePath) as any[];
     return rows.map(this.rowToTodo);
   }
 
   async create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo> {
     const id = Date.now().toString();
     const createdAt = new Date();
+    const workspacePath = todo.workspacePath || "/";
 
     const insertTodo = this.db.prepare(`
-      INSERT INTO todos (id, text, completed, created_at, artifact)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO todos (id, text, completed, created_at, artifact, workspace_path)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
-    insertTodo.run(id, todo.text, todo.completed ? 1 : 0, createdAt.toISOString(), todo.artifact || null);
+    insertTodo.run(
+      id, 
+      todo.text, 
+      todo.completed ? 1 : 0, 
+      createdAt.toISOString(), 
+      todo.artifact || null,
+      workspacePath
+    );
 
     // 插入标签关联
     if (todo.tagIds && todo.tagIds.length > 0) {
@@ -114,6 +159,7 @@ class SQLiteTodoRepository implements ITodoRepository {
       createdAt,
       tagIds: todo.tagIds || [],
       artifact: todo.artifact,
+      workspacePath,
     };
   }
 
@@ -202,13 +248,32 @@ class SQLiteTodoRepository implements ITodoRepository {
     return result.changes;
   }
 
-  async clearCompleted(): Promise<number> {
+  async clearCompleted(workspacePath?: string): Promise<number> {
     // 获取已完成的任务 ID
-    const findStmt = this.db.prepare("SELECT id FROM todos WHERE completed = 1");
-    const rows = findStmt.all() as { id: string }[];
+    let sql = "SELECT id FROM todos WHERE completed = 1";
+    const params: any[] = [];
+    
+    if (workspacePath) {
+      sql += " AND workspace_path = ?";
+      params.push(workspacePath);
+    }
+    
+    const findStmt = this.db.prepare(sql);
+    const rows = findStmt.all(...params) as { id: string }[];
     const ids = rows.map((r) => r.id);
 
     return this.batchDelete(ids);
+  }
+
+  async getAllWorkspaces(): Promise<string[]> {
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT workspace_path 
+      FROM todos 
+      WHERE workspace_path IS NOT NULL 
+      ORDER BY workspace_path
+    `);
+    const rows = stmt.all() as { workspace_path: string }[];
+    return rows.map(r => r.workspace_path);
   }
 
   async addTag(todoId: string, tagId: string): Promise<boolean> {
@@ -264,6 +329,7 @@ class SQLiteTodoRepository implements ITodoRepository {
       createdAt: new Date(row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
       artifact: row.artifact || undefined,
+      workspacePath: row.workspace_path || "/",
     };
   }
 }
@@ -501,6 +567,129 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
   }
 }
 
+// ==================== SQLite Workspace Repository ====================
+
+class SQLiteWorkspaceRepository implements IWorkspaceRepository {
+  constructor(private db: Database.Database) {}
+
+  async findAll(): Promise<Workspace[]> {
+    const stmt = this.db.prepare("SELECT * FROM workspaces ORDER BY name");
+    const rows = stmt.all() as any[];
+    return rows.map(this.rowToWorkspace);
+  }
+
+  async findById(id: string): Promise<Workspace | null> {
+    const stmt = this.db.prepare("SELECT * FROM workspaces WHERE id = ?");
+    const row = stmt.get(id) as any;
+    return row ? this.rowToWorkspace(row) : null;
+  }
+
+  async findByPath(path: string): Promise<Workspace | null> {
+    const stmt = this.db.prepare("SELECT * FROM workspaces WHERE path = ?");
+    const row = stmt.get(path) as any;
+    return row ? this.rowToWorkspace(row) : null;
+  }
+
+  async create(workspace: Omit<Workspace, "id" | "createdAt"> & { id?: string }): Promise<Workspace> {
+    const id = workspace.id || this.generateId(workspace.name);
+    const createdAt = new Date();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO workspaces (id, name, path, color, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, workspace.name, workspace.path, workspace.color || null, createdAt.toISOString());
+
+    return {
+      id,
+      name: workspace.name,
+      path: workspace.path,
+      color: workspace.color,
+      createdAt,
+    };
+  }
+
+  async update(id: string, data: Partial<Omit<Workspace, "id">>): Promise<Workspace | null> {
+    const existing = await this.findById(id);
+    if (!existing) return null;
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (data.name !== undefined) {
+      updates.push("name = ?");
+      values.push(data.name);
+    }
+    if (data.path !== undefined) {
+      updates.push("path = ?");
+      values.push(data.path);
+    }
+    if (data.color !== undefined) {
+      updates.push("color = ?");
+      values.push(data.color);
+    }
+
+    if (updates.length > 0) {
+      const stmt = this.db.prepare(`
+        UPDATE workspaces SET ${updates.join(", ")} WHERE id = ?
+      `);
+      stmt.run(...values, id);
+    }
+
+    return this.findById(id);
+  }
+
+  async delete(id: string): Promise<boolean> {
+    // 检查是否有任务使用此工作区
+    const count = await this.getTodoCount(id);
+    if (count > 0) {
+      throw new Error(`无法删除：该工作区还有 ${count} 个任务`);
+    }
+
+    const stmt = this.db.prepare("DELETE FROM workspaces WHERE id = ?");
+    const result = stmt.run(id);
+    return result.changes > 0;
+  }
+
+  async getTodoCount(id: string): Promise<number> {
+    const workspace = await this.findById(id);
+    if (!workspace) return 0;
+    
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM todos WHERE workspace_path = ?
+    `);
+    const row = stmt.get(workspace.path) as any;
+    return row?.count || 0;
+  }
+
+  async generateUniquePath(name: string): Promise<string> {
+    const basePath = "/" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    let path = basePath;
+    let counter = 1;
+    
+    while (await this.findByPath(path)) {
+      path = `${basePath}-${counter}`;
+      counter++;
+    }
+    
+    return path;
+  }
+
+  private generateId(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
+  }
+
+  private rowToWorkspace(row: any): Workspace {
+    return {
+      id: row.id,
+      name: row.name,
+      path: row.path,
+      color: row.color || undefined,
+      createdAt: new Date(row.created_at),
+    };
+  }
+}
+
 // ==================== SQLite Database ====================
 
 export class SQLiteDatabase implements IDatabase {
@@ -508,6 +697,7 @@ export class SQLiteDatabase implements IDatabase {
   public todos!: ITodoRepository;
   public tags!: ITagRepository;
   public subTasks!: ISubTaskRepository;
+  public workspaces!: IWorkspaceRepository;
 
   constructor(private config: { sqlitePath: string }) {}
 
@@ -527,6 +717,7 @@ export class SQLiteDatabase implements IDatabase {
       this.todos = new SQLiteTodoRepository(this.db);
       this.tags = new SQLiteTagRepository(this.db);
       this.subTasks = new SQLiteSubTaskRepository(this.db);
+      this.workspaces = new SQLiteWorkspaceRepository(this.db);
 
       // 执行迁移
       await this.migrate();
@@ -545,20 +736,28 @@ export class SQLiteDatabase implements IDatabase {
   async migrate(): Promise<void> {
     if (!this.db) throw new ConnectionError("Database not connected");
 
-    // 创建 todos 表（包含 artifact 字段）
+    // 创建 todos 表（包含 artifact 和 workspace_path 字段）
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS todos (
         id TEXT PRIMARY KEY,
         text TEXT NOT NULL,
         completed INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
-        artifact TEXT
+        artifact TEXT,
+        workspace_path TEXT NOT NULL DEFAULT '/'
       );
     `);
 
     // 迁移：为已存在的表添加 artifact 列
     try {
       this.db.exec(`ALTER TABLE todos ADD COLUMN artifact TEXT`);
+    } catch {
+      // 列已存在，忽略错误
+    }
+
+    // 迁移：为已存在的表添加 workspace_path 列
+    try {
+      this.db.exec(`ALTER TABLE todos ADD COLUMN workspace_path TEXT NOT NULL DEFAULT '/'`);
     } catch {
       // 列已存在，忽略错误
     }
@@ -604,6 +803,26 @@ export class SQLiteDatabase implements IDatabase {
       // 列已存在，忽略错误
     }
 
+    // 创建工作区表
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        color TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+
+    // 插入默认工作区（根目录）
+    const rootWorkspaceExists = this.db.prepare("SELECT 1 FROM workspaces WHERE id = 'root'").get();
+    if (!rootWorkspaceExists) {
+      this.db.exec(`
+        INSERT INTO workspaces (id, name, path, color, created_at)
+        VALUES ('root', '根目录', '/', 'slate', datetime('now'))
+      `);
+    }
+
     // 创建索引
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
@@ -623,6 +842,7 @@ export class SQLiteDatabase implements IDatabase {
       DROP TABLE IF EXISTS todo_tags;
       DROP TABLE IF EXISTS todos;
       DROP TABLE IF EXISTS tags;
+      DROP TABLE IF EXISTS workspaces;
     `);
 
     await this.migrate();

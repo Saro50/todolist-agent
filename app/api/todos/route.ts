@@ -9,14 +9,15 @@ export async function GET(request: NextRequest) {
     
     const tagId = searchParams.get("tag");
     const completed = searchParams.get("completed");
+    const workspace = searchParams.get("workspace");
 
     let todos;
     if (tagId) {
-      todos = await db.todos.findByTag(tagId);
+      todos = await db.todos.findByTag(tagId, workspace || undefined);
     } else if (completed !== null) {
-      todos = await db.todos.findByStatus(completed === "true");
+      todos = await db.todos.findByStatus(completed === "true", workspace || undefined);
     } else {
-      todos = await db.todos.findAll();
+      todos = await db.todos.findAll(workspace || undefined);
     }
 
     return NextResponse.json(todos);
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
       text: data.text,
       completed: data.completed ?? false,
       tagIds: data.tagIds || [],
+      workspacePath: data.workspacePath || "/",
     });
 
     return NextResponse.json(todo, { status: 201 });

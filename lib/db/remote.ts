@@ -2,6 +2,7 @@
  * 远程数据库实现
  * 
  * 通过 REST API 与远程服务器通信
+ * 支持多工作目录隔离
  */
 
 import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
@@ -58,8 +59,11 @@ abstract class BaseRemoteRepository {
 // ==================== Remote Todo Repository ====================
 
 class RemoteTodoRepository extends BaseRemoteRepository implements ITodoRepository {
-  async findAll(): Promise<Todo[]> {
-    return this.fetch("/api/todos");
+  async findAll(workspacePath?: string): Promise<Todo[]> {
+    const params = workspacePath && workspacePath !== "/" 
+      ? `?workspace=${encodeURIComponent(workspacePath)}` 
+      : "";
+    return this.fetch(`/api/todos${params}`);
   }
 
   async findById(id: string): Promise<Todo | null> {
@@ -71,12 +75,26 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     }
   }
 
-  async findByTag(tagId: string): Promise<Todo[]> {
-    return this.fetch(`/api/todos?tag=${tagId}`);
+  async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("tag", tagId);
+    if (workspacePath && workspacePath !== "/") {
+      params.append("workspace", workspacePath);
+    }
+    return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async findByStatus(completed: boolean): Promise<Todo[]> {
-    return this.fetch(`/api/todos?completed=${completed}`);
+  async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("completed", String(completed));
+    if (workspacePath && workspacePath !== "/") {
+      params.append("workspace", workspacePath);
+    }
+    return this.fetch(`/api/todos?${params.toString()}`);
+  }
+
+  async findByWorkspace(workspacePath: string): Promise<Todo[]> {
+    return this.fetch(`/api/todos?workspace=${encodeURIComponent(workspacePath)}`);
   }
 
   async create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo> {
@@ -116,11 +134,18 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return result.deletedCount;
   }
 
-  async clearCompleted(): Promise<number> {
-    const result = await this.fetch("/api/todos/clear-completed", {
+  async clearCompleted(workspacePath?: string): Promise<number> {
+    const params = workspacePath && workspacePath !== "/"
+      ? `?workspace=${encodeURIComponent(workspacePath)}`
+      : "";
+    const result = await this.fetch(`/api/todos/clear-completed${params}`, {
       method: "POST",
     });
     return result.deletedCount;
+  }
+
+  async getAllWorkspaces(): Promise<string[]> {
+    return this.fetch("/api/todos/workspaces");
   }
 
   async addTag(todoId: string, tagId: string): Promise<boolean> {

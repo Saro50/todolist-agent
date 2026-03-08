@@ -3,9 +3,10 @@
  * 
  * 封装对后端 API 的调用
  * 提供类型安全的数据访问
+ * 支持多工作目录隔离
  */
 
-import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
+import { Todo, Tag, SubTask, Workspace, UpdateSubTaskInput } from "@/app/types";
 
 const API_BASE = "/api";
 
@@ -36,23 +37,50 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 // ==================== Todo API ====================
 
 export const todoApi = {
-  getAll(): Promise<Todo[]> {
-    return fetchJson(`${API_BASE}/todos`);
+  /**
+   * 获取任务列表
+   * @param workspacePath - 可选的工作目录路径，不传则获取所有任务
+   */
+  getAll(workspacePath?: string): Promise<Todo[]> {
+    const params = workspacePath && workspacePath !== "/" 
+      ? `?workspace=${encodeURIComponent(workspacePath)}` 
+      : "";
+    return fetchJson(`${API_BASE}/todos${params}`);
   },
 
   getById(id: string): Promise<Todo> {
     return fetchJson(`${API_BASE}/todos/${id}`);
   },
 
-  getByTag(tagId: string): Promise<Todo[]> {
-    return fetchJson(`${API_BASE}/todos?tag=${tagId}`);
+  getByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("tag", tagId);
+    if (workspacePath && workspacePath !== "/") {
+      params.append("workspace", workspacePath);
+    }
+    return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
 
-  getByStatus(completed: boolean): Promise<Todo[]> {
-    return fetchJson(`${API_BASE}/todos?completed=${completed}`);
+  getByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("completed", String(completed));
+    if (workspacePath && workspacePath !== "/") {
+      params.append("workspace", workspacePath);
+    }
+    return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
 
-  create(data: { text: string; completed?: boolean; tagIds?: string[] }): Promise<Todo> {
+  /**
+   * 获取所有工作目录列表
+   */
+  getWorkspaces(): Promise<string[]> {
+    return fetchJson(`${API_BASE}/todos/workspaces`);
+  },
+
+  /**
+   * 创建任务
+   */
+  create(data: { text: string; completed?: boolean; tagIds?: string[]; workspacePath?: string }): Promise<Todo> {
     return fetchJson(`${API_BASE}/todos`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -111,6 +139,38 @@ export const tagApi = {
   },
 };
 
+// ==================== Workspace API ====================
+
+export const workspaceApi = {
+  getAll(): Promise<Workspace[]> {
+    return fetchJson(`${API_BASE}/workspaces`);
+  },
+
+  getById(id: string): Promise<Workspace> {
+    return fetchJson(`${API_BASE}/workspaces/${id}`);
+  },
+
+  create(data: { name: string; path?: string; color?: string; id?: string }): Promise<Workspace> {
+    return fetchJson(`${API_BASE}/workspaces`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  update(id: string, data: Partial<Omit<Workspace, "id">>): Promise<Workspace> {
+    return fetchJson(`${API_BASE}/workspaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  delete(id: string): Promise<void> {
+    return fetchJson(`${API_BASE}/workspaces/${id}`, {
+      method: "DELETE",
+    });
+  },
+};
+
 // ==================== SubTask API ====================
 
 export const subTaskApi = {
@@ -163,6 +223,7 @@ export const api = {
   todos: todoApi,
   tags: tagApi,
   subTasks: subTaskApi,
+  workspaces: workspaceApi,
 };
 
 export default api;

@@ -38,6 +38,7 @@ describe("MockDatabase", () => {
           text: "Buy milk",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         expect(todo.text).toBe("Buy milk");
@@ -51,6 +52,7 @@ describe("MockDatabase", () => {
           text: "Buy milk",
           completed: false,
           tagIds: ["tag-1", "tag-2"],
+          workspacePath: "/",
         });
 
         expect(todo.tagIds).toEqual(["tag-1", "tag-2"]);
@@ -63,12 +65,14 @@ describe("MockDatabase", () => {
           text: "First",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
         await new Promise((r) => setTimeout(r, 10));
         const todo2 = await db.todos.create({
           text: "Second",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const all = await db.todos.findAll();
@@ -85,6 +89,7 @@ describe("MockDatabase", () => {
           text: "Test",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const found = await db.todos.findById(created.id);
@@ -105,6 +110,7 @@ describe("MockDatabase", () => {
           text: "Original",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const updated = await db.todos.update(created.id, { text: "Updated" });
@@ -118,6 +124,7 @@ describe("MockDatabase", () => {
           text: "Test",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const updated = await db.todos.update(created.id, { completed: true });
@@ -137,6 +144,7 @@ describe("MockDatabase", () => {
           text: "To delete",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const deleted = await db.todos.delete(created.id);
@@ -154,11 +162,12 @@ describe("MockDatabase", () => {
 
     describe("findByStatus", () => {
       it("should return only completed todos", async () => {
-        await db.todos.create({ text: "Active", completed: false, tagIds: [] });
+        await db.todos.create({ text: "Active", completed: false, tagIds: [], workspacePath: "/" });
         await db.todos.create({
           text: "Completed",
           completed: true,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const completed = await db.todos.findByStatus(true);
@@ -170,17 +179,19 @@ describe("MockDatabase", () => {
 
     describe("clearCompleted", () => {
       it("should remove all completed todos", async () => {
-        await db.todos.create({ text: "Active 1", completed: false, tagIds: [] });
-        await db.todos.create({ text: "Active 2", completed: false, tagIds: [] });
+        await db.todos.create({ text: "Active 1", completed: false, tagIds: [], workspacePath: "/" });
+        await db.todos.create({ text: "Active 2", completed: false, tagIds: [], workspacePath: "/" });
         await db.todos.create({
           text: "Completed 1",
           completed: true,
           tagIds: [],
+          workspacePath: "/",
         });
         await db.todos.create({
           text: "Completed 2",
           completed: true,
           tagIds: [],
+          workspacePath: "/",
         });
 
         const deletedCount = await db.todos.clearCompleted();
@@ -198,6 +209,7 @@ describe("MockDatabase", () => {
           text: "Test",
           completed: false,
           tagIds: ["tag-1"],
+          workspacePath: "/",
         });
 
         await db.todos.setTags(todo.id, ["tag-2", "tag-3"]);
@@ -278,6 +290,7 @@ describe("MockDatabase", () => {
           text: "In transaction",
           completed: false,
           tagIds: [],
+          workspacePath: "/",
         });
         await tx.commit();
         return todo;
@@ -304,7 +317,7 @@ describe("MockDatabase", () => {
     });
 
     it("should clear all data", async () => {
-      await db.todos.create({ text: "Todo", completed: false, tagIds: [] });
+      await db.todos.create({ text: "Todo", completed: false, tagIds: [], workspacePath: "/" });
       await db.tags.create({ name: "Tag", color: "blue" });
 
       db.clear();

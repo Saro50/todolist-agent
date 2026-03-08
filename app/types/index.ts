@@ -47,9 +47,20 @@ export interface Todo {
   tagIds: string[];      // 关联的标签 ID 列表
   subTasks?: SubTask[];  // 子任务列表（可选，加载时填充）
   artifact?: string;     // 产物：Markdown 报告
+  workspacePath: string; // 工作目录路径：任务所属的工作空间
 }
 
 export type TodoStatus = "all" | "active" | "completed";
+
+// ==================== 工作区类型 ====================
+
+export interface Workspace {
+  id: string;           // 唯一标识 (如: "project-a")
+  name: string;         // 显示名称 (如: "项目A")
+  path: string;         // 路径 (如: "/projects/a")
+  color?: string;       // 可选颜色标识
+  createdAt: Date;
+}
 
 // 子任务输入（创建时）
 export interface CreateSubTaskInput {

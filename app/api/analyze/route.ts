@@ -74,8 +74,8 @@ export async function POST(request: NextRequest) {
      * 可以使用 ${KIMI_NOW}, ${KIMI_WORK_DIR} 等内置变量
      */
     const args: string[] = [
-      "--print",                    // 启用 Print 模式
-      "--final-message-only",       // 仅输出最终消息，跳过工具调用过程
+      "--quiet",                    // 启用 Print 模式
+      // "--final-message-only",       // 仅输出最终消息，跳过工具调用过程
       "-p",                         // 传入用户指令
       `"${taskText.replace(/"/g, '\\"')}"`,
     ];
@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
         TASK_CONTEXT: context ? JSON.stringify(context) : "",
       },
     });
+    console.log('[TaskAnalyzer] 原始输出:', result);
 
     // 解析结果 - 尝试提取 JSON 格式的任务列表
     let analysisResult;

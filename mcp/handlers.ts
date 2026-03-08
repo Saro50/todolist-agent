@@ -3,6 +3,7 @@
  * 
  * 实现所有工具的具体逻辑
  * 复用现有的 API 客户端与后端通信
+ * 支持多工作目录隔离
  */
 
 import { api } from "./api";
@@ -15,6 +16,7 @@ type Todo = {
   tagIds: string[];
   subTasks?: SubTask[];
   artifact?: string;
+  workspacePath?: string;
 };
 
 type Tag = {
@@ -32,6 +34,15 @@ type SubTask = {
   order: number;
   artifact?: string;
 };
+
+type Workspace = {
+  id: string;
+  name: string;
+  path: string;
+  color?: string;
+  createdAt: Date;
+};
+
 import {
   ToolName,
   GetTodosSchema,
@@ -39,6 +50,10 @@ import {
   UpdateTodoSchema,
   DeleteTodoSchema,
   ToggleTodoSchema,
+  GetWorkspacesSchema,
+  CreateWorkspaceSchema,
+  UpdateWorkspaceSchema,
+  DeleteWorkspaceSchema,
   CreateTagSchema,
   UpdateTagSchema,
   DeleteTagSchema,
@@ -49,6 +64,7 @@ import {
   ToggleSubTaskSchema,
   UpdateTodoArtifactSchema,
   UpdateSubTaskArtifactSchema,
+  GetStatsSchema,
 } from "./tools";
 import { z } from "zod";
 
@@ -62,14 +78,18 @@ interface CallToolResult {
 
 export type ToolResult = CallToolResult;
 
+// MCP 无状态设计：每个操作通过参数显式指定工作区
+// 不提供 getCurrentWorkspace/setCurrentWorkspace 等状态化接口
+
 // ==================== 格式化函数 ====================
 
 function formatTodo(todo: Todo, subTasks: SubTask[] = []): string {
   const status = todo.completed ? "✅" : "⬜";
   const tags = todo.tagIds.length > 0 ? ` [${todo.tagIds.join(", ")}]` : "";
   const artifact = todo.artifact ? " 📄" : "";
+  const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
   
-  let result = `${status} ${todo.text}${tags}${artifact}\n`;
+  let result = `${status} ${todo.text}${tags}${artifact}${workspace}\n`;
   result += `   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}\n`;
   
   if (subTasks.length > 0) {
@@ -86,6 +106,20 @@ function formatTodo(todo: Todo, subTasks: SubTask[] = []): string {
   }
   
   return result;
+}
+
+function formatWorkspace(ws: Workspace): string {
+  const colorEmoji: Record<string, string> = {
+    blue: "🔵",
+    emerald: "🟢",
+    violet: "🟣",
+    rose: "🔴",
+    amber: "🟡",
+    cyan: "🔷",
+    slate: "⚪",
+  };
+  const emoji = colorEmoji[ws.color || "slate"] || "⚪";
+  return `${emoji} ${ws.name} (${ws.path})`;
 }
 
 function formatTag(tag: Tag): string {
@@ -114,15 +148,18 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
   try {
     const params = GetTodosSchema.parse(args || {});
     
+    // 优先使用参数指定的工作区，否则使用当前工作区
+    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    
     let todos: Todo[];
     if (params.status === "active") {
-      todos = await api.todos.getByStatus(false);
+      todos = await api.todos.getByStatus(false, workspace);
     } else if (params.status === "completed") {
-      todos = await api.todos.getByStatus(true);
+      todos = await api.todos.getByStatus(true, workspace);
     } else if (params.tagId) {
-      todos = await api.todos.getByTag(params.tagId);
+      todos = await api.todos.getByTag(params.tagId, workspace);
     } else {
-      todos = await api.todos.getAll();
+      todos = await api.todos.getAll(workspace);
     }
 
     // 如果需要包含子任务
@@ -134,10 +171,12 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
     }
 
     if (todos.length === 0) {
-      return { content: [{ type: "text", text: "📭 暂无任务" }] };
+      const wsText = workspace && workspace !== "/" ? ` (工作区: ${workspace})` : "";
+      return { content: [{ type: "text", text: `📭 暂无任务${wsText}` }] };
     }
 
-    const lines = [`📋 任务列表 (${todos.length}项)\n`];
+    const wsHeader = workspace && workspace !== "/" ? ` [工作区: ${workspace}]` : "";
+    const lines = [`📋 任务列表${wsHeader} (${todos.length}项)\n`];
     for (const todo of todos) {
       lines.push(formatTodo(todo, params.includeSubTasks ? subTasksMap[todo.id] : []));
     }
@@ -151,10 +190,14 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
 export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
   try {
     const params = CreateTodoSchema.parse(args || {});
+    // 优先使用参数指定的工作区，否则使用当前工作区
+    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    
     const todo = await api.todos.create({
       text: params.text,
       tagIds: params.tagIds || [],
       artifact: params.artifact,
+      workspacePath: workspace,
     });
     
     return {
@@ -207,6 +250,85 @@ export async function handleToggleTodo(args: unknown): Promise<ToolResult> {
     
     return {
       content: [{ type: "text", text: `✅ 任务已标记为${status}\n\n${formatTodo(updated!)}` }],
+    };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+// ==================== 工作区处理器 ====================
+
+export async function handleGetWorkspaces(): Promise<ToolResult> {
+  try {
+    const workspaces = await api.workspaces.getAll();
+    
+    if (workspaces.length === 0) {
+      return { content: [{ type: "text", text: "📁 暂无工作区" }] };
+    }
+
+    const lines = [`📁 工作区列表 (${workspaces.length}个)\n`];
+    for (const ws of workspaces) {
+      lines.push(formatWorkspace(ws));
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function handleCreateWorkspace(args: unknown): Promise<ToolResult> {
+  try {
+    const params = CreateWorkspaceSchema.parse(args || {});
+    
+    const workspace = await api.workspaces.create({
+      name: params.name,
+      path: params.path,
+      color: params.color,
+      id: params.id,
+    });
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `✅ 工作区创建成功\n${formatWorkspace(workspace)}`, 
+      }],
+    };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function handleUpdateWorkspace(args: unknown): Promise<ToolResult> {
+  try {
+    const params = UpdateWorkspaceSchema.parse(args || {});
+    const { id, ...data } = params;
+    
+    const workspace = await api.workspaces.update(id, data);
+    
+    if (!workspace) {
+      return { content: [{ type: "text", text: "❌ 工作区不存在" }], isError: true };
+    }
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `✅ 工作区更新成功\n${formatWorkspace(workspace)}`, 
+      }],
+    };
+  } catch (error) {
+    return handleError(error);
+  }
+}
+
+export async function handleDeleteWorkspace(args: unknown): Promise<ToolResult> {
+  try {
+    const params = DeleteWorkspaceSchema.parse(args || {});
+    
+    await api.workspaces.delete(params.id);
+    
+    return {
+      content: [{ type: "text", text: `🗑️ 工作区已删除 (ID: ${params.id})` }],
     };
   } catch (error) {
     return handleError(error);
@@ -381,10 +503,13 @@ export async function handleUpdateSubTaskArtifact(args: unknown): Promise<ToolRe
 
 // ==================== 统计处理器 ====================
 
-export async function handleGetStats(): Promise<ToolResult> {
+export async function handleGetStats(args: unknown): Promise<ToolResult> {
   try {
+    const params = GetStatsSchema.parse(args || {});
+    const workspace = params.workspace !== undefined ? params.workspace : currentWorkspace;
+    
     const [todos, tags] = await Promise.all([
-      api.todos.getAll(),
+      api.todos.getAll(workspace),
       api.tags.getAll(),
     ]);
 
@@ -402,8 +527,9 @@ export async function handleGetStats(): Promise<ToolResult> {
       completedSubTasks += subTasks.filter(st => st.completed).length;
     }
 
+    const wsName = workspace && workspace !== "/" ? workspace : "所有工作区";
     const lines = [
-      "📊 TodoList 统计\n",
+      `📊 TodoList 统计 [${wsName}]\n`,
       `总任务数: ${total}`,
       `已完成: ${completed} (${completionRate}%)`,
       `进行中: ${active}`,
@@ -426,6 +552,11 @@ export const toolHandlers: Record<ToolName, (args: unknown) => Promise<ToolResul
   [ToolName.UPDATE_TODO]: handleUpdateTodo,
   [ToolName.DELETE_TODO]: handleDeleteTodo,
   [ToolName.TOGGLE_TODO]: handleToggleTodo,
+  
+  [ToolName.GET_WORKSPACES]: handleGetWorkspaces,
+  [ToolName.CREATE_WORKSPACE]: handleCreateWorkspace,
+  [ToolName.UPDATE_WORKSPACE]: handleUpdateWorkspace,
+  [ToolName.DELETE_WORKSPACE]: handleDeleteWorkspace,
   
   [ToolName.GET_TAGS]: handleGetTags,
   [ToolName.CREATE_TAG]: handleCreateTag,
