@@ -8,7 +8,7 @@
  * 4. 统一错误处理
  */
 
-import { Todo, Tag, SubTask, Workspace, CreateSubTaskInput, UpdateSubTaskInput } from "@/app/types";
+import { Todo, Tag, Workspace, CreateSubTaskInput, UpdateSubTaskInput, CreateTodoInput, UpdateTodoInput, TodoType } from "@/app/types";
 
 // 数据库连接配置
 export interface DatabaseConfig {
@@ -63,37 +63,48 @@ export interface FilterParams {
 }
 
 /**
- * Todo 数据访问接口
+ * Todo 数据访问接口（V2: 统一任务表）
  */
 export interface ITodoRepository {
-  // 查询
-  findAll(workspacePath?: string): Promise<Todo[]>;
-  findAllPaginated(workspacePath?: string, pagination?: PaginationParams, filters?: FilterParams): Promise<PaginatedResult<Todo>>;
+  // ========== 查询 ==========
+  findAll(workspacePath?: string, type?: TodoType): Promise<Todo[]>;
+  findAllPaginated(workspacePath?: string, pagination?: PaginationParams, filters?: FilterParams & { type?: TodoType }): Promise<PaginatedResult<Todo>>;
   findById(id: string): Promise<Todo | null>;
   findByTag(tagId: string, workspacePath?: string): Promise<Todo[]>;
   findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]>;
-  findByWorkspace(workspacePath: string): Promise<Todo[]>;
+  findByWorkspace(workspacePath: string, type?: TodoType): Promise<Todo[]>;
+  
+  // 查找子任务
+  findChildren(parentId: string): Promise<Todo[]>;
+  
+  // 查找父任务
+  findParents(childId: string): Promise<Todo[]>;
   
   // 统计（支持筛选）
-  count(workspacePath?: string, filters?: FilterParams): Promise<number>;
+  count(workspacePath?: string, filters?: FilterParams & { type?: TodoType }): Promise<number>;
   
-  // 增删改
-  create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo>;
-  update(id: string, data: Partial<Omit<Todo, "subTasks">>): Promise<Todo | null>;
+  // ========== 增删改 ==========
+  create(input: CreateTodoInput): Promise<Todo>;
+  update(id: string, data: UpdateTodoInput): Promise<Todo | null>;
   delete(id: string): Promise<boolean>;
   
   // 批量操作
   batchDelete(ids: string[]): Promise<number>;
   clearCompleted(workspacePath?: string): Promise<number>;
   
-  // 标签关联
+  // ========== 标签关联（所有任务类型都支持） ==========
   addTag(todoId: string, tagId: string): Promise<boolean>;
   removeTag(todoId: string, tagId: string): Promise<boolean>;
   setTags(todoId: string, tagIds: string[]): Promise<boolean>;
   
-  // 产物操作
+  // ========== 产物操作 ==========
   updateArtifact(todoId: string, artifact: string | null): Promise<boolean>;
   
+  // ========== 关系操作 ==========
+  addChild(parentId: string, childId: string): Promise<boolean>;
+  removeChild(parentId: string, childId: string): Promise<boolean>;
+  setChildren(parentId: string, childIds: string[]): Promise<boolean>;
+  reorderChildren(parentId: string, childIds: string[]): Promise<boolean>;
 }
 
 /**
@@ -136,25 +147,28 @@ export interface ITagRepository {
 }
 
 /**
- * 子任务数据访问接口
+ * 子任务数据访问接口（V2: 基于统一任务表）
+ * 
+ * 注意：子任务现在也是 Todo，只是 type='subtask'
+ * 这个接口保留用于向后兼容和便捷操作
  */
 export interface ISubTaskRepository {
   // 查询
-  findById(id: string): Promise<SubTask | null>;
-  findByTodoId(todoId: string): Promise<SubTask[]>;
+  findById(id: string): Promise<Todo | null>;
+  findByTodoId(parentId: string): Promise<Todo[]>;  // 查找父任务的所有子任务
   
   // 增删改
-  create(input: CreateSubTaskInput): Promise<SubTask>;
-  update(id: string, data: UpdateSubTaskInput): Promise<SubTask | null>;
+  create(input: CreateSubTaskInput): Promise<Todo>;
+  update(id: string, data: UpdateSubTaskInput): Promise<Todo | null>;
   delete(id: string): Promise<boolean>;
   
   // 批量操作
-  deleteByTodoId(todoId: string): Promise<number>;
-  reorder(todoId: string, subTaskIds: string[]): Promise<boolean>;
+  deleteByTodoId(parentId: string): Promise<number>;  // 删除父任务的所有子任务
+  reorder(parentId: string, subTaskIds: string[]): Promise<boolean>;
   
   // 统计
-  getCompletedCount(todoId: string): Promise<number>;
-  getTotalCount(todoId: string): Promise<number>;
+  getCompletedCount(parentId: string): Promise<number>;
+  getTotalCount(parentId: string): Promise<number>;
   
   // 产物操作
   updateArtifact(subTaskId: string, artifact: string | null): Promise<boolean>;
@@ -194,7 +208,7 @@ export interface IDatabase {
  */
 export interface ChangeLog {
   id: string;
-  table: "todos" | "tags" | "subTasks";
+  table: "todos" | "tags" | "todo_relations";
   operation: "create" | "update" | "delete";
   recordId: string;
   data?: string;  // JSON 序列化的变更数据

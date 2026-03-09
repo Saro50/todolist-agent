@@ -12,11 +12,13 @@ import Database from "better-sqlite3";
 import { 
   Todo, 
   Tag, 
-  SubTask,
   Workspace,
   CreateSubTaskInput, 
   UpdateSubTaskInput,
-  ProcessingStatus
+  CreateTodoInput,
+  UpdateTodoInput,
+  TaskStatus,
+  TodoType
 } from "@/app/types";
 import {
   IDatabase,
@@ -35,17 +37,27 @@ import {
 class SQLiteTodoRepository implements ITodoRepository {
   constructor(private db: Database.Database) {}
 
-  async findAll(workspacePath?: string): Promise<Todo[]> {
+  async findAll(workspacePath?: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
     `;
+    const conditions: string[] = [];
     const params: any[] = [];
     
     if (workspacePath) {
-      sql += ` WHERE t.workspace_path = ?`;
+      conditions.push(`t.workspace_path = ?`);
       params.push(workspacePath);
+    }
+    
+    if (type) {
+      conditions.push(`t.type = ?`);
+      params.push(type);
+    }
+    
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(' AND ')}`;
     }
     
     sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
@@ -58,7 +70,7 @@ class SQLiteTodoRepository implements ITodoRepository {
   async findAllPaginated(
     workspacePath?: string, 
     pagination?: { page: number; pageSize: number },
-    filters?: { status?: string; tagId?: string }
+    filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }
   ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
     const page = pagination?.page || 1;
     const pageSize = pagination?.pageSize || 20;
@@ -76,6 +88,11 @@ class SQLiteTodoRepository implements ITodoRepository {
     if (filters?.status) {
       whereConditions.push(`t.status = ?`);
       whereParams.push(filters.status);
+    }
+
+    if (filters?.type) {
+      whereConditions.push(`t.type = ?`);
+      whereParams.push(filters.type);
     }
 
     const whereClause = whereConditions.length > 0 
@@ -122,7 +139,7 @@ class SQLiteTodoRepository implements ITodoRepository {
     };
   }
 
-  async count(workspacePath?: string, filters?: { status?: string; tagId?: string }): Promise<number> {
+  async count(workspacePath?: string, filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }): Promise<number> {
     // 如果有标签筛选，使用子查询
     if (filters?.tagId) {
       let sql = `
@@ -141,6 +158,11 @@ class SQLiteTodoRepository implements ITodoRepository {
       if (filters?.status) {
         sql += ` AND t.status = ?`;
         params.push(filters.status);
+      }
+
+      if (filters?.type) {
+        sql += ` AND t.type = ?`;
+        params.push(filters.type);
       }
       
       const stmt = this.db.prepare(sql);
@@ -161,6 +183,11 @@ class SQLiteTodoRepository implements ITodoRepository {
     if (filters?.status) {
       conditions.push(`status = ?`);
       params.push(filters.status);
+    }
+
+    if (filters?.type) {
+      conditions.push(`type = ?`);
+      params.push(filters.type);
     }
     
     if (conditions.length > 0) {
@@ -227,66 +254,159 @@ class SQLiteTodoRepository implements ITodoRepository {
     return rows.map(this.rowToTodo);
   }
 
-  async findByWorkspace(workspacePath: string): Promise<Todo[]> {
-    const stmt = this.db.prepare(`
+  async findByWorkspace(workspacePath: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
+    let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
       WHERE t.workspace_path = ?
-      GROUP BY t.id
-      ORDER BY t.created_at DESC
-    `);
+    `;
+    const params: any[] = [workspacePath];
     
-    const rows = stmt.all(workspacePath) as any[];
+    if (type) {
+      sql += ` AND t.type = ?`;
+      params.push(type);
+    }
+    
+    sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
+    
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
     return rows.map(this.rowToTodo);
   }
 
-  async create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo> {
+  // ========== 关系操作 ==========
+
+  async findChildren(parentId: string): Promise<Todo[]> {
+    const stmt = this.db.prepare(`
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.child_id
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      WHERE tr.parent_id = ?
+      GROUP BY t.id
+      ORDER BY t.sort_order ASC, t.created_at ASC
+    `);
+    
+    const rows = stmt.all(parentId) as any[];
+    return rows.map(this.rowToTodo);
+  }
+
+  async findParents(childId: string): Promise<Todo[]> {
+    const stmt = this.db.prepare(`
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.parent_id
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      WHERE tr.child_id = ?
+      GROUP BY t.id
+    `);
+    
+    const rows = stmt.all(childId) as any[];
+    return rows.map(this.rowToTodo);
+  }
+
+  async addChild(parentId: string, childId: string): Promise<boolean> {
+    try {
+      const stmt = this.db.prepare(`
+        INSERT OR IGNORE INTO todo_relations (parent_id, child_id) VALUES (?, ?)
+      `);
+      const result = stmt.run(parentId, childId);
+      return result.changes > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async removeChild(parentId: string, childId: string): Promise<boolean> {
+    const stmt = this.db.prepare(`
+      DELETE FROM todo_relations WHERE parent_id = ? AND child_id = ?
+    `);
+    const result = stmt.run(parentId, childId);
+    return result.changes > 0;
+  }
+
+  async setChildren(parentId: string, childIds: string[]): Promise<boolean> {
+    const deleteStmt = this.db.prepare("DELETE FROM todo_relations WHERE parent_id = ?");
+    deleteStmt.run(parentId);
+
+    if (childIds.length === 0) return true;
+
+    const insertStmt = this.db.prepare(`
+      INSERT INTO todo_relations (parent_id, child_id) VALUES (?, ?)
+    `);
+
+    for (const childId of childIds) {
+      insertStmt.run(parentId, childId);
+    }
+
+    return true;
+  }
+
+  async reorderChildren(parentId: string, childIds: string[]): Promise<boolean> {
+    const stmt = this.db.prepare(`
+      UPDATE todos SET sort_order = ? WHERE id = ?
+    `);
+
+    for (let i = 0; i < childIds.length; i++) {
+      stmt.run(i, childIds[i]);
+    }
+
+    return true;
+  }
+
+  async create(input: import("@/app/types").CreateTodoInput): Promise<Todo> {
     const id = Date.now().toString();
     const createdAt = new Date();
-    const workspacePath = todo.workspacePath || "/";
+    const updatedAt = createdAt;
+    const workspacePath = input.workspacePath || "/";
+    const type = input.type || "task";
     // 从 status 派生 completed，或从 completed 派生 status
-    const status = todo.status || (todo.completed ? "completed" : "pending");
+    const status = input.status || "pending";
     const completed = status === "completed";
 
     const insertTodo = this.db.prepare(`
-      INSERT INTO todos (id, text, status, completed, created_at, artifact, workspace_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, workspace_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertTodo.run(
       id, 
-      todo.text, 
+      type,
+      input.text, 
       status,
       completed ? 1 : 0, 
       createdAt.toISOString(), 
-      todo.artifact || null,
+      updatedAt.toISOString(),
+      input.artifact || null,
       workspacePath
     );
 
     // 插入标签关联
-    if (todo.tagIds && todo.tagIds.length > 0) {
+    if (input.tagIds && input.tagIds.length > 0) {
       const insertTag = this.db.prepare(`
         INSERT INTO todo_tags (todo_id, tag_id) VALUES (?, ?)
       `);
-      for (const tagId of todo.tagIds) {
+      for (const tagId of input.tagIds) {
         insertTag.run(id, tagId);
       }
     }
 
     return {
       id,
-      text: todo.text,
+      type,
+      text: input.text,
       status,
       completed,
       createdAt,
-      tagIds: todo.tagIds || [],
-      artifact: todo.artifact,
+      updatedAt,
+      tagIds: input.tagIds || [],
+      artifact: input.artifact,
       workspacePath,
     };
   }
 
-  async update(id: string, data: Partial<Omit<Todo, "subTasks">>): Promise<Todo | null> {
+  async update(id: string, data: import("@/app/types").UpdateTodoInput): Promise<Todo | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
 
@@ -321,6 +441,14 @@ class SQLiteTodoRepository implements ITodoRepository {
       updates.push("artifact = ?");
       values.push(data.artifact);
     }
+    if (data.sortOrder !== undefined) {
+      updates.push("sort_order = ?");
+      values.push(data.sortOrder);
+    }
+
+    // 始终更新 updated_at
+    updates.push("updated_at = ?");
+    values.push(new Date().toISOString());
 
     if (updates.length > 0) {
       const stmt = this.db.prepare(`
@@ -348,13 +476,21 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   async delete(id: string): Promise<boolean> {
-    // 先删除子任务
-    const deleteSubTasks = this.db.prepare("DELETE FROM sub_tasks WHERE todo_id = ?");
-    deleteSubTasks.run(id);
+    // 获取所有子任务 ID
+    const childIds = this.db.prepare(
+      "SELECT child_id FROM todo_relations WHERE parent_id = ?"
+    ).all(id) as { child_id: string }[];
+
+    // 级联删除子任务（统一表结构，子任务也是 todos）
+    for (const { child_id } of childIds) {
+      await this.delete(child_id);  // 递归删除
+    }
+
+    // 删除关系
+    this.db.prepare("DELETE FROM todo_relations WHERE parent_id = ? OR child_id = ?").run(id, id);
 
     // 删除标签关联（外键约束）
-    const deleteTags = this.db.prepare("DELETE FROM todo_tags WHERE todo_id = ?");
-    deleteTags.run(id);
+    this.db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
 
     const stmt = this.db.prepare("DELETE FROM todos WHERE id = ?");
     const result = stmt.run(id);
@@ -366,23 +502,29 @@ class SQLiteTodoRepository implements ITodoRepository {
 
     const placeholders = ids.map(() => "?").join(",");
     
-    // 删除子任务
-    const deleteSubTasks = this.db.prepare(`
-      DELETE FROM sub_tasks WHERE todo_id IN (${placeholders})
-    `);
-    deleteSubTasks.run(...ids);
+    // 获取所有子任务 ID（包括级联的子任务）
+    const allIds = new Set<string>(ids);
+    for (const id of ids) {
+      const childIds = this.db.prepare(
+        "SELECT child_id FROM todo_relations WHERE parent_id = ?"
+      ).all(id) as { child_id: string }[];
+      childIds.forEach(c => allIds.add(c.child_id));
+    }
+
+    const allIdList = Array.from(allIds);
+    const allPlaceholders = allIdList.map(() => "?").join(",");
+    
+    // 删除关系
+    this.db.prepare(`DELETE FROM todo_relations WHERE parent_id IN (${allPlaceholders}) OR child_id IN (${allPlaceholders})`).run(...allIdList, ...allIdList);
 
     // 删除标签关联
-    const deleteTags = this.db.prepare(`
-      DELETE FROM todo_tags WHERE todo_id IN (${placeholders})
-    `);
-    deleteTags.run(...ids);
+    this.db.prepare(`DELETE FROM todo_tags WHERE todo_id IN (${allPlaceholders})`).run(...allIdList);
 
     // 删除任务
     const deleteTodos = this.db.prepare(`
-      DELETE FROM todos WHERE id IN (${placeholders})
+      DELETE FROM todos WHERE id IN (${allPlaceholders})
     `);
-    const result = deleteTodos.run(...ids);
+    const result = deleteTodos.run(...allIdList);
     
     return result.changes;
   }
@@ -461,16 +603,19 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   private rowToTodo(row: any): Todo {
-    const status: ProcessingStatus = row.status || (row.completed ? "completed" : "pending");
+    const status: TaskStatus = row.status || (row.completed ? "completed" : "pending");
     return {
       id: row.id,
+      type: row.type || 'task',
       text: row.text,
       status,
       completed: status === "completed",
       createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at || row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
       artifact: row.artifact || undefined,
       workspacePath: row.workspace_path || "/",
+      sortOrder: row.sort_order,
     };
   }
 }
@@ -566,54 +711,87 @@ class SQLiteTagRepository implements ITagRepository {
 }
 
 // ==================== SQLite SubTask Repository ====================
+// V2: 基于统一任务表，子任务也是 Todo，type='subtask'
 
 class SQLiteSubTaskRepository implements ISubTaskRepository {
   constructor(private db: Database.Database) {}
 
-  async findById(id: string): Promise<SubTask | null> {
-    const stmt = this.db.prepare("SELECT * FROM sub_tasks WHERE id = ?");
+  async findById(id: string): Promise<Todo | null> {
+    const stmt = this.db.prepare(`
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      WHERE t.id = ? AND t.type = 'subtask'
+      GROUP BY t.id
+    `);
     const row = stmt.get(id) as any;
     return row ? this.rowToSubTask(row) : null;
   }
 
-  async findByTodoId(todoId: string): Promise<SubTask[]> {
+  async findByTodoId(parentId: string): Promise<Todo[]> {
     const stmt = this.db.prepare(`
-      SELECT * FROM sub_tasks 
-      WHERE todo_id = ? 
-      ORDER BY "order" ASC, created_at ASC
+      SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.child_id
+      LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+      WHERE tr.parent_id = ? AND t.type = 'subtask'
+      GROUP BY t.id
+      ORDER BY t.sort_order ASC, t.created_at ASC
     `);
-    const rows = stmt.all(todoId) as any[];
+    const rows = stmt.all(parentId) as any[];
     return rows.map(this.rowToSubTask);
   }
 
-  async create(input: CreateSubTaskInput): Promise<SubTask> {
+  async create(input: CreateSubTaskInput): Promise<Todo> {
     const id = Date.now().toString();
     const createdAt = new Date();
+    const updatedAt = createdAt;
 
-    // 获取当前最大 order
+    // 获取父任务的 workspace_path
+    const parentStmt = this.db.prepare(`
+      SELECT workspace_path FROM todos WHERE id = ?
+    `);
+    const parentRow = parentStmt.get(input.parentId) as any;
+    const workspacePath = parentRow?.workspace_path || '/';
+
+    // 获取当前最大 sort_order
     const maxOrderStmt = this.db.prepare(`
-      SELECT MAX("order") as max_order FROM sub_tasks WHERE todo_id = ?
+      SELECT MAX(t.sort_order) as max_order 
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.child_id
+      WHERE tr.parent_id = ?
     `);
-    const maxOrderRow = maxOrderStmt.get(input.todoId) as any;
-    const order = (maxOrderRow?.max_order || 0) + 1;
+    const maxOrderRow = maxOrderStmt.get(input.parentId) as any;
+    const sortOrder = (maxOrderRow?.max_order || 0) + 1;
 
+    // 插入子任务到统一 todos 表
     const stmt = this.db.prepare(`
-      INSERT INTO sub_tasks (id, todo_id, text, completed, created_at, "order", artifact)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, workspace_path, sort_order)
+      VALUES (?, 'subtask', ?, 'pending', 0, ?, ?, NULL, ?, ?)
     `);
-    stmt.run(id, input.todoId, input.text, 0, createdAt.toISOString(), order, null);
+    stmt.run(id, input.text, createdAt.toISOString(), updatedAt.toISOString(), workspacePath, sortOrder);
+
+    // 建立关系
+    const relationStmt = this.db.prepare(`
+      INSERT INTO todo_relations (parent_id, child_id) VALUES (?, ?)
+    `);
+    relationStmt.run(input.parentId, id);
 
     return {
       id,
-      todoId: input.todoId,
+      type: 'subtask',
       text: input.text,
+      status: 'pending',
       completed: false,
       createdAt,
-      order,
+      updatedAt,
+      tagIds: [],
+      workspacePath,
+      sortOrder,
     };
   }
 
-  async update(id: string, data: UpdateSubTaskInput): Promise<SubTask | null> {
+  async update(id: string, data: UpdateSubTaskInput): Promise<Todo | null> {
     const existing = await this.findById(id);
     if (!existing) return null;
 
@@ -627,19 +805,25 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
     if (data.completed !== undefined) {
       updates.push("completed = ?");
       values.push(data.completed ? 1 : 0);
+      updates.push("status = ?");
+      values.push(data.completed ? 'completed' : 'pending');
     }
-    if (data.order !== undefined) {
-      updates.push("\"order\" = ?");
-      values.push(data.order);
+    if (data.sortOrder !== undefined) {
+      updates.push("sort_order = ?");
+      values.push(data.sortOrder);
     }
     if (data.artifact !== undefined) {
       updates.push("artifact = ?");
       values.push(data.artifact);
     }
 
+    // 始终更新 updated_at
+    updates.push("updated_at = ?");
+    values.push(new Date().toISOString());
+
     if (updates.length > 0) {
       const stmt = this.db.prepare(`
-        UPDATE sub_tasks SET ${updates.join(", ")} WHERE id = ?
+        UPDATE todos SET ${updates.join(", ")} WHERE id = ? AND type = 'subtask'
       `);
       stmt.run(...values, id);
     }
@@ -648,61 +832,88 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
   }
 
   async delete(id: string): Promise<boolean> {
-    const stmt = this.db.prepare("DELETE FROM sub_tasks WHERE id = ?");
+    // 先删除关系
+    this.db.prepare("DELETE FROM todo_relations WHERE child_id = ?").run(id);
+    
+    // 删除标签关联
+    this.db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
+    
+    // 删除任务
+    const stmt = this.db.prepare("DELETE FROM todos WHERE id = ? AND type = 'subtask'");
     const result = stmt.run(id);
     return result.changes > 0;
   }
 
-  async deleteByTodoId(todoId: string): Promise<number> {
-    const stmt = this.db.prepare("DELETE FROM sub_tasks WHERE todo_id = ?");
-    const result = stmt.run(todoId);
-    return result.changes;
+  async deleteByTodoId(parentId: string): Promise<number> {
+    // 获取所有子任务 ID
+    const childIds = this.db.prepare(`
+      SELECT child_id FROM todo_relations WHERE parent_id = ?
+    `).all(parentId) as { child_id: string }[];
+    
+    let count = 0;
+    for (const { child_id } of childIds) {
+      if (await this.delete(child_id)) {
+        count++;
+      }
+    }
+    return count;
   }
 
-  async reorder(todoId: string, subTaskIds: string[]): Promise<boolean> {
+  async reorder(parentId: string, subTaskIds: string[]): Promise<boolean> {
     const stmt = this.db.prepare(`
-      UPDATE sub_tasks SET "order" = ? WHERE id = ? AND todo_id = ?
+      UPDATE todos SET sort_order = ? WHERE id = ?
     `);
 
     for (let i = 0; i < subTaskIds.length; i++) {
-      stmt.run(i, subTaskIds[i], todoId);
+      stmt.run(i, subTaskIds[i]);
     }
 
     return true;
   }
 
-  async getCompletedCount(todoId: string): Promise<number> {
+  async getCompletedCount(parentId: string): Promise<number> {
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sub_tasks WHERE todo_id = ? AND completed = 1
+      SELECT COUNT(*) as count 
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.child_id
+      WHERE tr.parent_id = ? AND t.type = 'subtask' AND t.completed = 1
     `);
-    const row = stmt.get(todoId) as any;
+    const row = stmt.get(parentId) as any;
     return row?.count || 0;
   }
 
-  async getTotalCount(todoId: string): Promise<number> {
+  async getTotalCount(parentId: string): Promise<number> {
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sub_tasks WHERE todo_id = ?
+      SELECT COUNT(*) as count 
+      FROM todos t
+      JOIN todo_relations tr ON t.id = tr.child_id
+      WHERE tr.parent_id = ? AND t.type = 'subtask'
     `);
-    const row = stmt.get(todoId) as any;
+    const row = stmt.get(parentId) as any;
     return row?.count || 0;
   }
 
   async updateArtifact(subTaskId: string, artifact: string | null): Promise<boolean> {
     const stmt = this.db.prepare(`
-      UPDATE sub_tasks SET artifact = ? WHERE id = ?
+      UPDATE todos SET artifact = ?, updated_at = ? WHERE id = ? AND type = 'subtask'
     `);
-    const result = stmt.run(artifact, subTaskId);
+    const result = stmt.run(artifact, new Date().toISOString(), subTaskId);
     return result.changes > 0;
   }
 
-  private rowToSubTask(row: any): SubTask {
+  private rowToSubTask(row: any): Todo {
+    const status: TaskStatus = row.status || (row.completed ? "completed" : "pending");
     return {
       id: row.id,
-      todoId: row.todo_id,
+      type: 'subtask',
       text: row.text,
-      completed: Boolean(row.completed),
+      status,
+      completed: status === "completed",
       createdAt: new Date(row.created_at),
-      order: row.order,
+      updatedAt: new Date(row.updated_at || row.created_at),
+      tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
+      workspacePath: row.workspace_path || "/",
+      sortOrder: row.sort_order,
       artifact: row.artifact || undefined,
     };
   }
@@ -877,48 +1088,37 @@ export class SQLiteDatabase implements IDatabase {
   async migrate(): Promise<void> {
     if (!this.db) throw new ConnectionError("Database not connected");
 
-    // 创建 todos 表（包含 artifact 和 workspace_path 字段）
+    // ========== V2: 统一任务表（支持主任务和子任务） ==========
+    
+    // 创建新的统一 todos 表
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS todos (
         id TEXT PRIMARY KEY,
+        type TEXT NOT NULL DEFAULT 'task',
         text TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         completed INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
         artifact TEXT,
-        workspace_path TEXT NOT NULL DEFAULT '/'
+        workspace_path TEXT NOT NULL DEFAULT '/',
+        sort_order INTEGER
       );
     `);
 
-    // 迁移：为已存在的表添加 status 列
-    try {
-      this.db.exec(`ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
-    } catch {
-      // 列已存在，忽略错误
-    }
+    // 迁移：从旧表结构迁移数据（如果存在旧表）
+    this.migrateFromV1();
 
-    // 迁移：同步 status 和 completed 字段
-    try {
-      this.db.exec(`
-        UPDATE todos SET status = 'completed' WHERE completed = 1 AND status IS NULL
-      `);
-    } catch {
-      // 忽略错误
-    }
-
-    // 迁移：为已存在的表添加 artifact 列
-    try {
-      this.db.exec(`ALTER TABLE todos ADD COLUMN artifact TEXT`);
-    } catch {
-      // 列已存在，忽略错误
-    }
-
-    // 迁移：为已存在的表添加 workspace_path 列
-    try {
-      this.db.exec(`ALTER TABLE todos ADD COLUMN workspace_path TEXT NOT NULL DEFAULT '/'`);
-    } catch {
-      // 列已存在，忽略错误
-    }
+    // 创建任务关系表（主任务-子任务映射）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS todo_relations (
+        parent_id TEXT NOT NULL,
+        child_id TEXT NOT NULL,
+        PRIMARY KEY (parent_id, child_id),
+        FOREIGN KEY (parent_id) REFERENCES todos(id) ON DELETE CASCADE,
+        FOREIGN KEY (child_id) REFERENCES todos(id) ON DELETE CASCADE
+      );
+    `);
 
     // 创建 tags 表
     this.db.exec(`
@@ -929,7 +1129,7 @@ export class SQLiteDatabase implements IDatabase {
       );
     `);
 
-    // 创建关联表
+    // 创建任务-标签关联表（所有类型的任务都可以有标签）
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS todo_tags (
         todo_id TEXT NOT NULL,
@@ -939,27 +1139,6 @@ export class SQLiteDatabase implements IDatabase {
         FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
       );
     `);
-
-    // 创建子任务表（包含 artifact 字段）
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sub_tasks (
-        id TEXT PRIMARY KEY,
-        todo_id TEXT NOT NULL,
-        text TEXT NOT NULL,
-        completed INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        "order" INTEGER NOT NULL DEFAULT 0,
-        artifact TEXT,
-        FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE
-      );
-    `);
-
-    // 迁移：为已存在的 sub_tasks 表添加 artifact 列
-    try {
-      this.db.exec(`ALTER TABLE sub_tasks ADD COLUMN artifact TEXT`);
-    } catch {
-      // 列已存在，忽略错误
-    }
 
     // 创建工作区表
     this.db.exec(`
@@ -983,24 +1162,110 @@ export class SQLiteDatabase implements IDatabase {
 
     // 创建索引
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_todos_type ON todos(type);
+      CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
       CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
+      CREATE INDEX IF NOT EXISTS idx_todos_workspace ON todos(workspace_path);
       CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
       CREATE INDEX IF NOT EXISTS idx_todo_tags_todo_id ON todo_tags(todo_id);
       CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
-      CREATE INDEX IF NOT EXISTS idx_sub_tasks_todo_id ON sub_tasks(todo_id);
-      CREATE INDEX IF NOT EXISTS idx_sub_tasks_order ON sub_tasks("order");
+      CREATE INDEX IF NOT EXISTS idx_todo_relations_parent ON todo_relations(parent_id);
+      CREATE INDEX IF NOT EXISTS idx_todo_relations_child ON todo_relations(child_id);
     `);
+  }
+
+  /**
+   * 从 V1 版本迁移数据
+   * - 旧表：todos (主任务) + sub_tasks (子任务)
+   * - 新表：统一 todos 表 + todo_relations 关系表
+   */
+  private migrateFromV1(): void {
+    if (!this.db) return;
+
+    // 检查是否存在旧版 sub_tasks 表
+    const subTasksTableExists = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='sub_tasks'"
+    ).get();
+
+    if (!subTasksTableExists) return;
+
+    // 检查是否已经完成过迁移（todos 表已有 type 列）
+    const todosInfo = this.db.prepare("PRAGMA table_info(todos)").all() as any[];
+    const hasTypeColumn = todosInfo.some(col => col.name === 'type');
+    
+    if (hasTypeColumn) return; // 已迁移
+
+    // 添加 type 列到 todos 表
+    try {
+      this.db.exec(`ALTER TABLE todos ADD COLUMN type TEXT NOT NULL DEFAULT 'task'`);
+      this.db.exec(`ALTER TABLE todos ADD COLUMN updated_at TEXT`);
+      this.db.exec(`ALTER TABLE todos ADD COLUMN sort_order INTEGER`);
+    } catch {
+      // 列可能已存在
+    }
+
+    // 更新旧数据的 updated_at
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE todos SET updated_at = ? WHERE updated_at IS NULL`).run(now);
+
+    // 迁移子任务到统一 todos 表
+    const subTasks = this.db.prepare(`
+      SELECT s.*, t.workspace_path 
+      FROM sub_tasks s
+      JOIN todos t ON s.todo_id = t.id
+    `).all() as any[];
+
+    for (const sub of subTasks) {
+      const id = sub.id;
+      const now = new Date().toISOString();
+      
+      // 插入子任务到 todos 表
+      try {
+        this.db.prepare(`
+          INSERT OR IGNORE INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, workspace_path, sort_order)
+          VALUES (?, 'subtask', ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id,
+          sub.text,
+          sub.completed ? 'completed' : 'pending',
+          sub.completed ? 1 : 0,
+          sub.created_at,
+          now,
+          sub.artifact,
+          sub.workspace_path || '/',
+          sub.order || 0
+        );
+
+        // 建立关系
+        this.db.prepare(`
+          INSERT OR IGNORE INTO todo_relations (parent_id, child_id)
+          VALUES (?, ?)
+        `).run(sub.todo_id, id);
+      } catch (e) {
+        console.error(`Failed to migrate subtask ${id}:`, e);
+      }
+    }
+
+    // 重命名旧表作为备份
+    try {
+      this.db.exec(`ALTER TABLE sub_tasks RENAME TO sub_tasks_backup_v1`);
+    } catch {
+      // 忽略错误
+    }
+
+    console.log(`Migrated ${subTasks.length} subtasks to unified todos table`);
   }
 
   async reset(): Promise<void> {
     if (!this.db) throw new ConnectionError("Database not connected");
 
     this.db.exec(`
-      DROP TABLE IF EXISTS sub_tasks;
+      DROP TABLE IF EXISTS todo_relations;
       DROP TABLE IF EXISTS todo_tags;
       DROP TABLE IF EXISTS todos;
       DROP TABLE IF EXISTS tags;
       DROP TABLE IF EXISTS workspaces;
+      DROP TABLE IF EXISTS sub_tasks_backup_v1;
     `);
 
     await this.migrate();

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const data = await request.json();
 
     const subTask = await db.subTasks.create({
-      todoId: id,
+      parentId: id,
       text: data.text,
     });
 

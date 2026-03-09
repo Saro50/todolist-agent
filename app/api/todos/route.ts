@@ -98,7 +98,6 @@ export async function POST(request: NextRequest) {
     const todo = await db.todos.create({
       text: data.text,
       status,
-      completed: status === "completed",
       tagIds: data.tagIds || [],
       workspacePath,
     });

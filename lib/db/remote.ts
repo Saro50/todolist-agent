@@ -5,7 +5,7 @@
  * 支持多工作目录隔离
  */
 
-import { Todo, Tag, SubTask, CreateSubTaskInput, UpdateSubTaskInput, Workspace } from "@/app/types";
+import { Todo, Tag, CreateSubTaskInput, UpdateSubTaskInput, CreateTodoInput, UpdateTodoInput, Workspace, TodoType } from "@/app/types";
 import {
   IDatabase,
   ITodoRepository,
@@ -60,17 +60,22 @@ abstract class BaseRemoteRepository {
 // ==================== Remote Todo Repository ====================
 
 class RemoteTodoRepository extends BaseRemoteRepository implements ITodoRepository {
-  async findAll(workspacePath?: string): Promise<Todo[]> {
-    const params = workspacePath !== undefined
-      ? `?workspace=${encodeURIComponent(workspacePath)}` 
-      : "";
-    return this.fetch(`/api/todos${params}`);
+  async findAll(workspacePath?: string, type?: TodoType): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    if (type !== undefined) {
+      params.append("type", type);
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.fetch(`/api/todos${query}`);
   }
 
   async findAllPaginated(
     workspacePath?: string, 
     pagination?: { page: number; pageSize: number },
-    filters?: { status?: string; tagId?: string }
+    filters?: { status?: string; tagId?: string; type?: TodoType }
   ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
     const params = new URLSearchParams();
     if (workspacePath !== undefined) {
@@ -86,10 +91,13 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     if (filters?.tagId) {
       params.append("tag", filters.tagId);
     }
+    if (filters?.type) {
+      params.append("type", filters.type);
+    }
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async count(workspacePath?: string, filters?: { status?: string; tagId?: string }): Promise<number> {
+  async count(workspacePath?: string, filters?: { status?: string; tagId?: string; type?: TodoType }): Promise<number> {
     const params = new URLSearchParams();
     if (workspacePath !== undefined) {
       params.append("workspace", workspacePath);
@@ -99,6 +107,9 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     }
     if (filters?.tagId) {
       params.append("tag", filters.tagId);
+    }
+    if (filters?.type) {
+      params.append("type", filters.type);
     }
     params.append("count", "true");
     const result = await this.fetch(`/api/todos?${params.toString()}`);
@@ -132,18 +143,31 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async findByWorkspace(workspacePath: string): Promise<Todo[]> {
-    return this.fetch(`/api/todos?workspace=${encodeURIComponent(workspacePath)}`);
+  async findByWorkspace(workspacePath: string, type?: TodoType): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("workspace", workspacePath);
+    if (type !== undefined) {
+      params.append("type", type);
+    }
+    return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async create(todo: Omit<Todo, "id" | "createdAt" | "subTasks">): Promise<Todo> {
+  async findChildren(parentId: string): Promise<Todo[]> {
+    return this.fetch(`/api/todos/${parentId}/children`);
+  }
+
+  async findParents(childId: string): Promise<Todo[]> {
+    return this.fetch(`/api/todos/${childId}/parents`);
+  }
+
+  async create(todo: CreateTodoInput): Promise<Todo> {
     return this.fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify(todo),
     });
   }
 
-  async update(id: string, data: Partial<Omit<Todo, "subTasks">>): Promise<Todo | null> {
+  async update(id: string, data: UpdateTodoInput): Promise<Todo | null> {
     try {
       return await this.fetch(`/api/todos/${id}`, {
         method: "PATCH",
@@ -233,6 +257,55 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
       return false;
     }
   }
+
+  // ========== 关系操作 ==========
+
+  async addChild(parentId: string, childId: string): Promise<boolean> {
+    try {
+      await this.fetch(`/api/todos/${parentId}/children`, {
+        method: "POST",
+        body: JSON.stringify({ childId }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async removeChild(parentId: string, childId: string): Promise<boolean> {
+    try {
+      await this.fetch(`/api/todos/${parentId}/children/${childId}`, {
+        method: "DELETE",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async setChildren(parentId: string, childIds: string[]): Promise<boolean> {
+    try {
+      await this.fetch(`/api/todos/${parentId}/children`, {
+        method: "PUT",
+        body: JSON.stringify({ childIds }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async reorderChildren(parentId: string, childIds: string[]): Promise<boolean> {
+    try {
+      await this.fetch(`/api/todos/${parentId}/children/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ childIds }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 // ==================== Remote Tag Repository ====================
@@ -293,7 +366,7 @@ class RemoteTagRepository extends BaseRemoteRepository implements ITagRepository
 // ==================== Remote SubTask Repository ====================
 
 class RemoteSubTaskRepository extends BaseRemoteRepository implements ISubTaskRepository {
-  async findById(id: string): Promise<SubTask | null> {
+  async findById(id: string): Promise<Todo | null> {
     try {
       return await this.fetch(`/api/subtasks/${id}`);
     } catch (error) {
@@ -302,18 +375,18 @@ class RemoteSubTaskRepository extends BaseRemoteRepository implements ISubTaskRe
     }
   }
 
-  async findByTodoId(todoId: string): Promise<SubTask[]> {
-    return this.fetch(`/api/todos/${todoId}/subtasks`);
+  async findByTodoId(parentId: string): Promise<Todo[]> {
+    return this.fetch(`/api/todos/${parentId}/subtasks`);
   }
 
-  async create(input: CreateSubTaskInput): Promise<SubTask> {
-    return this.fetch(`/api/todos/${input.todoId}/subtasks`, {
+  async create(input: CreateSubTaskInput): Promise<Todo> {
+    return this.fetch(`/api/todos/${input.parentId}/subtasks`, {
       method: "POST",
       body: JSON.stringify({ text: input.text }),
     });
   }
 
-  async update(id: string, data: UpdateSubTaskInput): Promise<SubTask | null> {
+  async update(id: string, data: UpdateSubTaskInput): Promise<Todo | null> {
     try {
       return await this.fetch(`/api/subtasks/${id}`, {
         method: "PATCH",
@@ -335,16 +408,16 @@ class RemoteSubTaskRepository extends BaseRemoteRepository implements ISubTaskRe
     }
   }
 
-  async deleteByTodoId(todoId: string): Promise<number> {
-    const result = await this.fetch(`/api/todos/${todoId}/subtasks`, {
+  async deleteByTodoId(parentId: string): Promise<number> {
+    const result = await this.fetch(`/api/todos/${parentId}/subtasks`, {
       method: "DELETE",
     });
     return result.deletedCount;
   }
 
-  async reorder(todoId: string, subTaskIds: string[]): Promise<boolean> {
+  async reorder(parentId: string, subTaskIds: string[]): Promise<boolean> {
     try {
-      await this.fetch(`/api/todos/${todoId}/subtasks/reorder`, {
+      await this.fetch(`/api/todos/${parentId}/subtasks/reorder`, {
         method: "POST",
         body: JSON.stringify({ subTaskIds }),
       });
@@ -354,13 +427,13 @@ class RemoteSubTaskRepository extends BaseRemoteRepository implements ISubTaskRe
     }
   }
 
-  async getCompletedCount(todoId: string): Promise<number> {
-    const result = await this.fetch(`/api/todos/${todoId}/subtasks/count?completed=true`);
+  async getCompletedCount(parentId: string): Promise<number> {
+    const result = await this.fetch(`/api/todos/${parentId}/subtasks/count?completed=true`);
     return result.count;
   }
 
-  async getTotalCount(todoId: string): Promise<number> {
-    const result = await this.fetch(`/api/todos/${todoId}/subtasks/count`);
+  async getTotalCount(parentId: string): Promise<number> {
+    const result = await this.fetch(`/api/todos/${parentId}/subtasks/count`);
     return result.count;
   }
 

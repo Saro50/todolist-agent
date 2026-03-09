@@ -39,30 +39,33 @@ export function getTaskStatusConfig(status: TaskStatus) {
   return TASK_STATUS_CONFIG[status];
 }
 
-// ==================== 子任务类型 ====================
+// ==================== 任务类型 ====================
 
-export interface SubTask {
-  id: string;
-  todoId: string;        // 所属任务的 ID
-  text: string;
-  completed: boolean;
-  createdAt: Date;
-  order: number;         // 排序序号
-  artifact?: string;     // 产物：Markdown 报告
-}
-
-// ==================== 主任务类型 ====================
+export type TodoType = 'task' | 'subtask';
 
 export interface Todo {
   id: string;
+  type: TodoType;        // 'task' 主任务, 'subtask' 子任务
   text: string;
   status: TaskStatus;    // 处理状态：待处理/处理中/已完成
   completed: boolean;    // 是否已完成（向后兼容，由 status 派生）
   createdAt: Date;       // 创建时间
+  updatedAt: Date;       // 更新时间
   tagIds: string[];      // 关联的标签 ID 列表
-  subTasks?: SubTask[];  // 子任务列表（可选，加载时填充）
+  children?: Todo[];     // 子任务列表（可选，加载时填充）
   artifact?: string;     // 产物：Markdown 报告
   workspacePath: string; // 工作目录路径：任务所属的工作空间
+  sortOrder?: number;    // 排序序号（子任务用）
+}
+
+// 向后兼容：SubTask 作为 Todo 的别名
+export type SubTask = Todo;
+
+// ==================== 任务关系类型 ====================
+
+export interface TodoRelation {
+  parentId: string;
+  childId: string;
 }
 
 // 筛选用的状态类型
@@ -85,13 +88,34 @@ export interface Workspace {
 // 子任务输入（创建时）
 export interface CreateSubTaskInput {
   text: string;
-  todoId: string;
+  parentId: string;      // 父任务 ID（原 todoId）
 }
 
 // 子任务更新
 export interface UpdateSubTaskInput {
   text?: string;
   completed?: boolean;
-  order?: number;
+  sortOrder?: number;
   artifact?: string;     // 产物更新
+}
+
+// 创建任务输入
+export interface CreateTodoInput {
+  text: string;
+  type?: TodoType;
+  status?: TaskStatus;
+  completed?: boolean;  // 可选，会从 status 派生
+  tagIds?: string[];
+  artifact?: string;
+  workspacePath?: string;
+}
+
+// 更新任务输入
+export interface UpdateTodoInput {
+  text?: string;
+  status?: TaskStatus;
+  completed?: boolean;
+  tagIds?: string[];
+  artifact?: string;
+  sortOrder?: number;
 }
