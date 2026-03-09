@@ -108,6 +108,16 @@ my-app/
 
 ## MCP 工具清单（25+）
 
+## 配置到工具
+```json
+{
+  "mcpServers": {
+    "todolist": {
+      "url": "http://localhost:4001/mcp"
+    }
+  }
+}
+```
 ### 任务管理
 - `get_todos` / `create_todo` / `update_todo` / `delete_todo` / `toggle_todo`
 
@@ -123,13 +133,6 @@ my-app/
 ### 产物与搜索
 - `update_todo_artifact` / `update_subtask_artifact`
 - `search_todos` / `get_todos_by_tag` / `get_stats`
-
-## 文档
-
-- [MCP 配置指南](./MCP_SETUP.md)
-- [端口配置说明](./PORT_CONFIG.md)
-- [Agent 配置](./AGENT_CONFIG.md)
-- [MCP PROMPT](./mcp/PROMPT.md)
 
 ## License
 
