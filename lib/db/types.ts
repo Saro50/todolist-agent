@@ -63,16 +63,16 @@ export interface FilterParams {
 }
 
 /**
- * Todo 数据访问接口（V2: 统一任务表）
+ * Todo 数据访问接口（V3: 使用 todo_workspaces 关系表）
  */
 export interface ITodoRepository {
   // ========== 查询 ==========
-  findAll(workspacePath?: string, type?: TodoType): Promise<Todo[]>;
-  findAllPaginated(workspacePath?: string, pagination?: PaginationParams, filters?: FilterParams & { type?: TodoType }): Promise<PaginatedResult<Todo>>;
+  findAll(workspaceId?: string, type?: TodoType): Promise<Todo[]>;
+  findAllPaginated(workspaceId?: string, pagination?: PaginationParams, filters?: FilterParams & { type?: TodoType }): Promise<PaginatedResult<Todo>>;
   findById(id: string): Promise<Todo | null>;
-  findByTag(tagId: string, workspacePath?: string): Promise<Todo[]>;
-  findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]>;
-  findByWorkspace(workspacePath: string, type?: TodoType): Promise<Todo[]>;
+  findByTag(tagId: string, workspaceId?: string): Promise<Todo[]>;
+  findByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]>;
+  findByWorkspace(workspaceId: string, type?: TodoType): Promise<Todo[]>;
   
   // 查找子任务
   findChildren(parentId: string): Promise<Todo[]>;
@@ -81,7 +81,7 @@ export interface ITodoRepository {
   findParents(childId: string): Promise<Todo[]>;
   
   // 统计（支持筛选）
-  count(workspacePath?: string, filters?: FilterParams & { type?: TodoType }): Promise<number>;
+  count(workspaceId?: string, filters?: FilterParams & { type?: TodoType }): Promise<number>;
   
   // ========== 增删改 ==========
   create(input: CreateTodoInput): Promise<Todo>;
@@ -90,7 +90,7 @@ export interface ITodoRepository {
   
   // 批量操作
   batchDelete(ids: string[]): Promise<number>;
-  clearCompleted(workspacePath?: string): Promise<number>;
+  clearCompleted(workspaceId?: string): Promise<number>;
   
   // ========== 标签关联（所有任务类型都支持） ==========
   addTag(todoId: string, tagId: string): Promise<boolean>;
@@ -147,10 +147,10 @@ export interface ITagRepository {
 }
 
 /**
- * 子任务数据访问接口（V2: 基于统一任务表）
+ * 子任务数据访问接口（V3: 基于统一任务表，通过关系跟随主任务工作区）
  * 
  * 注意：子任务现在也是 Todo，只是 type='subtask'
- * 这个接口保留用于向后兼容和便捷操作
+ * 子任务不直接关联工作区，通过 todo_relations 跟随主任务
  */
 export interface ISubTaskRepository {
   // 查询

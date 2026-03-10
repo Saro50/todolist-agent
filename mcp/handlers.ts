@@ -19,7 +19,7 @@ type Todo = {
   tagIds: string[];
   subTasks?: SubTask[];
   artifact?: string;
-  workspacePath?: string;
+  workspaceId?: string;
 };
 
 type Tag = {
@@ -102,7 +102,7 @@ function formatTodo(todo: Todo, subTasks: SubTask[] = []): string {
   };
   const tags = todo.tagIds.length > 0 ? ` [${todo.tagIds.join(", ")}]` : "";
   const artifact = todo.artifact ? " 📄" : "";
-  const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
+  const workspace = todo.workspaceId ? ` 📁${todo.workspaceId}` : "";
   
   let result = `${completedIcon} ${todo.text}${tags}${artifact}${workspace}\n`;
   result += `   ID: ${todo.id} | 状态: ${statusIcon[todo.status]} ${statusText[todo.status]} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}\n`;
@@ -163,18 +163,32 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
   try {
     const params = GetTodosSchema.parse(args || {});
     
-    // 使用参数指定的工作区，不传则获取所有工作区的任务
-    const workspace = params.workspace;
+    // workspaceId 为必传参数
+    const workspaceId = params.workspaceId;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 获取任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}\n\n请先使用 get_workspaces 获取可用工作区。` 
+        }],
+        isError: true,
+      };
+    }
     
     let todos: Todo[];
     if (params.status === "active") {
-      todos = await api.todos.getByStatus(false, workspace);
+      todos = await api.todos.getByStatus(false, workspaceId);
     } else if (params.status === "completed") {
-      todos = await api.todos.getByStatus(true, workspace);
+      todos = await api.todos.getByStatus(true, workspaceId);
     } else if (params.tagId) {
-      todos = await api.todos.getByTag(params.tagId, workspace);
+      todos = await api.todos.getByTag(params.tagId, workspaceId);
     } else {
-      todos = await api.todos.getAll(workspace);
+      todos = await api.todos.getAll(workspaceId);
     }
 
     // 如果需要包含子任务
@@ -186,11 +200,10 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
     }
 
     if (todos.length === 0) {
-      const wsText = workspace && workspace !== "/" ? ` (工作区: ${workspace})` : "";
-      return { content: [{ type: "text", text: `📭 暂无任务${wsText}` }] };
+      return { content: [{ type: "text", text: `📭 工作区 "${workspace.name}" (ID: ${workspaceId}) 暂无任务` }] };
     }
 
-    const wsHeader = workspace && workspace !== "/" ? ` [工作区: ${workspace}]` : "";
+    const wsHeader = ` [工作区: ${workspace.name}]`;
     const lines = [`📋 任务列表${wsHeader} (${todos.length}项)\n`];
     for (const todo of todos) {
       lines.push(formatTodo(todo, params.includeSubTasks ? subTasksMap[todo.id] : []));
@@ -205,48 +218,43 @@ export async function handleGetTodos(args: unknown): Promise<ToolResult> {
 export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
   try {
     const params = CreateTodoSchema.parse(args || {});
-    // 使用参数指定的工作区，不传则创建在根目录
-    const workspacePath = params.workspace || "/";
+    // workspaceId 为必传参数
+    const workspaceId = params.workspaceId;
     
     // 打印传入参数，方便调试
     console.log(`[MCP create_todo] 参数:`, JSON.stringify({
       text: params.text,
-      workspace: params.workspace,
-      workspacePath,
+      workspaceId,
       status: params.status,
       tagIds: params.tagIds,
       hasArtifact: !!params.artifact,
     }));
     
-    // 检查工作区是否存在（根目录始终允许）
-    if (workspacePath !== "/") {
-      const workspaces = await api.workspaces.getAll();
-      const workspaceExists = workspaces.some((w: any) => 
-        w.path === workspacePath || w.id === workspacePath
-      );
-      
-      if (!workspaceExists) {
-        const availableWorkspaces = workspaces.map((w: any) => `${w.name}(${w.path})`).join(", ") || "无";
-        console.error(`[MCP create_todo] 错误: 工作区不存在: ${workspacePath}`);
-        return {
-          content: [{ 
-            type: "text", 
-            text: `❌ 任务创建失败: 工作区 "${workspacePath}" 不存在\n\n可用工作区: ${availableWorkspaces}\n\n请先使用 create_workspace 创建工作区，或使用 "/" 创建在根目录。` 
-          }],
-          isError: true,
-        };
-      }
+    // 检查工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      console.error(`[MCP create_todo] 错误: 工作区不存在: ${workspaceId}`);
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 任务创建失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}\n\n请先使用 get_workspaces 获取可用工作区，或 create_workspace 创建新工作区。` 
+        }],
+        isError: true,
+      };
     }
     
     const todo = await api.todos.create({
       text: params.text,
       tagIds: params.tagIds || [],
       artifact: params.artifact,
-      workspacePath,
+      workspaceId,
       status: params.status,
     });
     
-    console.log(`[MCP create_todo] 成功创建任务: ${todo.id}, 工作区: ${todo.workspacePath}`);
+    console.log(`[MCP create_todo] 成功创建任务: ${todo.id}, 工作区ID: ${todo.workspaceId}`);
     
     return {
       content: [{ type: "text", text: `✅ 任务创建成功\n\n${formatTodo(todo)}` }],
@@ -260,18 +268,32 @@ export async function handleCreateTodo(args: unknown): Promise<ToolResult> {
 export async function handleUpdateTodo(args: unknown): Promise<ToolResult> {
   try {
     const params = UpdateTodoSchema.parse(args || {});
-    const { id, ...data } = params;
+    const { id, workspaceId, ...data } = params;
     
     // 打印传入参数，方便调试
     console.log(`[MCP update_todo] 参数:`, JSON.stringify({
       id,
+      workspaceId,
       ...data,
-      hasWorkspace: !!data.workspace,
     }));
     
-    const todo = await api.todos.update(id, data);
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 任务更新失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
     
-    console.log(`[MCP update_todo] 成功更新任务: ${todo?.id}, 工作区: ${todo?.workspacePath}`);
+    const todo = await api.todos.update(id, { ...data, workspaceId });
+    
+    console.log(`[MCP update_todo] 成功更新任务: ${todo?.id}, 工作区ID: ${todo?.workspaceId}`);
     
     return {
       content: [{ type: "text", text: `✅ 任务更新成功\n\n${formatTodo(todo!)}` }],
@@ -461,7 +483,23 @@ export async function handleDeleteTag(args: unknown): Promise<ToolResult> {
 export async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
   try {
     const params = GetSubTasksSchema.parse(args || {});
-    const subTasks = await api.subTasks.getByTodoId(params.todoId);
+    const { workspaceId, todoId } = params;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 获取子任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
+    
+    const subTasks = await api.subTasks.getByTodoId(todoId);
     
     if (subTasks.length === 0) {
       return { content: [{ type: "text", text: "📭 该任务暂无子任务" }] };
@@ -481,7 +519,23 @@ export async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
 export async function handleCreateSubTask(args: unknown): Promise<ToolResult> {
   try {
     const params = CreateSubTaskSchema.parse(args || {});
-    const subTask = await api.subTasks.create(params.todoId, params.text);
+    const { workspaceId, todoId, text } = params;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 创建子任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
+    
+    const subTask = await api.subTasks.create(todoId, text);
     
     return {
       content: [{ type: "text", text: `✅ 子任务创建成功\n${formatSubTask(subTask)}` }],
@@ -566,9 +620,24 @@ export async function handleSearchTodos(args: unknown): Promise<ToolResult> {
   try {
     const params = SearchTodosSchema.parse(args || {});
     const keyword = params.keyword.toLowerCase();
+    const workspaceId = params.workspaceId;
     
-    // 获取任务（按工作区筛选）
-    let todos = await api.todos.getAll(params.workspace);
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 搜索失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
+    
+    // 获取任务（按工作区ID筛选）
+    let todos = await api.todos.getAll(workspaceId);
     
     // 按关键词模糊匹配标题
     todos = todos.filter(todo => todo.text.toLowerCase().includes(keyword));
@@ -593,14 +662,14 @@ export async function handleSearchTodos(args: unknown): Promise<ToolResult> {
       };
     }
 
-    const wsHeader = params.workspace ? ` [工作区: ${params.workspace}]` : "";
+    const wsHeader = ` [工作区: ${workspace.name}]`;
     const lines = [`🔍 搜索结果 "${params.keyword}"${wsHeader} (${todos.length}项)\n`];
     
     for (const todo of todos) {
       const status = todo.completed ? "✅" : "⬜";
       const tagNames = todo.tagIds.map(id => tagMap.get(id)?.name || id).join(", ");
       const tags = tagNames ? ` [${tagNames}]` : "";
-      const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
+      const workspace = todo.workspaceId ? ` 📁${todo.workspaceId}` : "";
       lines.push(`${status} ${todo.text}${tags}${workspace}`);
       lines.push(`   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}`);
     }
@@ -614,6 +683,21 @@ export async function handleSearchTodos(args: unknown): Promise<ToolResult> {
 export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
   try {
     const params = GetTodosByTagSchema.parse(args || {});
+    const workspaceId = params.workspaceId;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 查询失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
     
     // 获取标签信息
     const tags = await api.tags.getAll();
@@ -630,7 +714,7 @@ export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
     }
     
     // 获取任务
-    let todos = await api.todos.getByTag(params.tagId, params.workspace);
+    let todos = await api.todos.getByTag(params.tagId, workspaceId);
     
     // 按状态筛选
     if (params.status === "active") {
@@ -640,21 +724,20 @@ export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
     }
 
     if (todos.length === 0) {
-      const wsText = params.workspace ? ` (工作区: ${params.workspace})` : "";
       return { 
         content: [{ 
           type: "text", 
-          text: `🏷️ 标签 "${tag.name}"${wsText} 下暂无任务` 
+          text: `🏷️ 工作区 "${workspace.name}" 中标签 "${tag.name}" 下暂无任务` 
         }] 
       };
     }
 
-    const wsHeader = params.workspace ? ` [工作区: ${params.workspace}]` : "";
+    const wsHeader = ` [工作区: ${workspace.name}]`;
     const lines = [`🏷️ 标签 "${tag.name}"${wsHeader} (${todos.length}项)\n`];
     
     for (const todo of todos) {
       const status = todo.completed ? "✅" : "⬜";
-      const workspace = todo.workspacePath && todo.workspacePath !== "/" ? ` 📁${todo.workspacePath}` : "";
+      const workspace = todo.workspaceId ? ` 📁${todo.workspaceId}` : "";
       lines.push(`${status} ${todo.text}${workspace}`);
       lines.push(`   ID: ${todo.id} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}`);
     }
@@ -670,11 +753,25 @@ export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
 export async function handleGetStats(args: unknown): Promise<ToolResult> {
   try {
     const params = GetStatsSchema.parse(args || {});
-    // 使用参数指定的工作区，不传则统计所有工作区
-    const workspace = params.workspace;
+    // workspaceId 为必传参数
+    const workspaceId = params.workspaceId;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 统计失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
     
     const [todos, tags] = await Promise.all([
-      api.todos.getAll(workspace),
+      api.todos.getAll(workspaceId),
       api.tags.getAll(),
     ]);
 
@@ -692,7 +789,7 @@ export async function handleGetStats(args: unknown): Promise<ToolResult> {
       completedSubTasks += subTasks.filter(st => st.completed).length;
     }
 
-    const wsName = workspace && workspace !== "/" ? workspace : "所有工作区";
+    const wsName = workspace.name;
     const lines = [
       `📊 TodoList 统计 [${wsName}]\n`,
       `总任务数: ${total}`,

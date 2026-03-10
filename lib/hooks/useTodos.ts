@@ -43,9 +43,10 @@ interface UseTodosReturn {
   clearFilters: () => void;
   
   // 操作函数
-  addTodo: (text: string, tagIds: string[], workspacePath?: string) => Promise<void>;
+  addTodo: (text: string, tagIds: string[], workspaceId?: string) => Promise<void>;
   toggleTodo: (id: string) => Promise<void>;
   deleteTodo: (id: string) => Promise<void>;
+  batchDeleteTodos: (ids: string[]) => Promise<void>;
   updateTodoTags: (id: string, tagIds: string[]) => Promise<void>;
   clearCompleted: () => Promise<void>;
   createTag: (name: string, color: Tag["color"]) => Promise<Tag>;
@@ -70,6 +71,11 @@ interface UseTodosReturn {
   updateWorkspace: (id: string, data: Partial<Workspace>) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
   refreshWorkspaces: () => Promise<void>;
+  
+  // 默认工作区操作
+  defaultWorkspaceId: string | null;
+  setDefaultWorkspace: (workspaceId: string) => void;
+  clearDefaultWorkspace: () => void;
   
   // 分页操作
   goToPage: (page: number) => Promise<void>;
@@ -130,18 +136,40 @@ export function useTodos(): UseTodosReturn {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(ROOT_WORKSPACE);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([ROOT_WORKSPACE]);
   
+  // 默认工作区状态（从 LocalStorage 读取）
+  const [defaultWorkspaceId, setDefaultWorkspaceId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return localStorage.getItem("defaultWorkspaceId");
+    } catch {
+      return null;
+    }
+  });
+  
   // 用于追踪当前加载的请求，避免竞态条件
   const loadingRef = useRef<number>(0);
 
-  // 加载工作区列表
+  // 加载工作区列表，并根据默认设置自动切换
   const loadWorkspaces = useCallback(async () => {
     try {
       const workspacesData = await api.workspaces.getAll();
-      setWorkspaces(workspacesData.length > 0 ? workspacesData : [ROOT_WORKSPACE]);
-      return workspacesData;
+      const validWorkspaces = workspacesData.length > 0 ? workspacesData : [ROOT_WORKSPACE];
+      setWorkspaces(validWorkspaces);
+      
+      // 如果有默认工作区设置，自动切换到该工作区
+      const savedDefaultId = localStorage.getItem("defaultWorkspaceId");
+      if (savedDefaultId) {
+        const defaultWorkspace = validWorkspaces.find(w => w.id === savedDefaultId);
+        if (defaultWorkspace) {
+          setCurrentWorkspace(defaultWorkspace);
+          return { workspaces: validWorkspaces, defaultWorkspace };
+        }
+      }
+      
+      return { workspaces: validWorkspaces };
     } catch (err) {
       console.error("Failed to load workspaces:", err);
-      return [ROOT_WORKSPACE];
+      return { workspaces: [ROOT_WORKSPACE] };
     }
   }, []);
 
@@ -168,7 +196,7 @@ export function useTodos(): UseTodosReturn {
       // 并行加载任务和标签
       const [todosResult, tagsData] = await Promise.all([
         api.todos.getAllPaginated(
-          targetWorkspace.path, 
+          targetWorkspace.id, 
           page, 
           DEFAULT_PAGE_SIZE,
           effectiveFilters
@@ -210,10 +238,18 @@ export function useTodos(): UseTodosReturn {
     }
   }, [currentWorkspace, statusFilter, tagFilter]);
 
-  // 初始加载
+  // 初始加载：先加载工作区，如果有默认工作区则自动切换
   useEffect(() => {
-    loadWorkspaces();
-    loadData(undefined, 1, false);
+    const init = async () => {
+      const result = await loadWorkspaces();
+      // 如果有默认工作区，使用它加载数据；否则使用当前工作区
+      if (result && "defaultWorkspace" in result && result.defaultWorkspace) {
+        await loadData(result.defaultWorkspace, 1, false);
+      } else {
+        await loadData(undefined, 1, false);
+      }
+    };
+    init();
   }, []);
 
   // 筛选变化时重新加载
@@ -229,6 +265,18 @@ export function useTodos(): UseTodosReturn {
     setCurrentWorkspace(workspace);
     await loadData(workspace, 1, false);
   }, [loadData]);
+  
+  // 设置默认工作区
+  const setDefaultWorkspace = useCallback((workspaceId: string) => {
+    localStorage.setItem("defaultWorkspaceId", workspaceId);
+    setDefaultWorkspaceId(workspaceId);
+  }, []);
+  
+  // 清除默认工作区
+  const clearDefaultWorkspace = useCallback(() => {
+    localStorage.removeItem("defaultWorkspaceId");
+    setDefaultWorkspaceId(null);
+  }, []);
 
   // 设置状态筛选
   const handleSetStatusFilter = useCallback((status: TodoFilterStatus) => {
@@ -300,20 +348,20 @@ export function useTodos(): UseTodosReturn {
   }, [loadWorkspaces]);
 
   // 添加任务
-  const addTodo = useCallback(async (text: string, tagIds: string[], workspacePath?: string) => {
+  const addTodo = useCallback(async (text: string, tagIds: string[], workspaceId?: string) => {
     try {
-      const targetPath = workspacePath ?? currentWorkspace.path;
-      const newTodo = await api.todos.create({ text, tagIds, workspacePath: targetPath });
+      const targetId = workspaceId ?? currentWorkspace.id;
+      const newTodo = await api.todos.create({ text, tagIds, workspaceId: targetId });
       
       // 如果添加在当前工作区，刷新列表
-      if (newTodo.workspacePath === currentWorkspace.path) {
+      if (newTodo.workspaceId === currentWorkspace.id) {
         await refresh();
       }
     } catch (err) {
       console.error("Failed to add todo:", err);
       throw err;
     }
-  }, [currentWorkspace.path, refresh]);
+  }, [currentWorkspace.id, refresh]);
 
   // 切换任务状态
   const toggleTodo = useCallback(async (id: string) => {
@@ -348,6 +396,28 @@ export function useTodos(): UseTodosReturn {
       });
     } catch (err) {
       console.error("Failed to delete todo:", err);
+      throw err;
+    }
+  }, []);
+
+  // 批量删除任务
+  const batchDeleteTodos = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    try {
+      await api.todos.batchDelete(ids);
+      setTodos((prev) => prev.filter((t) => !ids.includes(t.id)));
+      setSubTasks((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      setLoadedSubTaskIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed to batch delete todos:", err);
       throw err;
     }
   }, []);
@@ -563,6 +633,7 @@ export function useTodos(): UseTodosReturn {
     addTodo,
     toggleTodo,
     deleteTodo,
+    batchDeleteTodos,
     updateTodoTags,
     updateTodoArtifact,
     updateTodoStatus,
@@ -583,6 +654,11 @@ export function useTodos(): UseTodosReturn {
     updateWorkspace,
     deleteWorkspace,
     refreshWorkspaces,
+    
+    // 默认工作区操作
+    defaultWorkspaceId,
+    setDefaultWorkspace,
+    clearDefaultWorkspace,
     
     // 分页操作
     goToPage,

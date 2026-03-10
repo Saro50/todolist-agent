@@ -38,6 +38,11 @@ interface TodoItemProps {
   
   // 任务分析
   onAnalyze?: (todo: Todo) => void;
+  
+  // 批量选择相关
+  isSelectable?: boolean;
+  isSelected?: boolean;
+  onSelect?: () => void;
 }
 
 /**
@@ -63,6 +68,9 @@ export const TodoItem = memo(function TodoItem({
   onUpdateSubTaskArtifact,
   onUpdateArtifact,
   onAnalyze,
+  isSelectable = false,
+  isSelected = false,
+  onSelect,
 }: TodoItemProps) {
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -122,16 +130,23 @@ export const TodoItem = memo(function TodoItem({
         todo.completed && "opacity-60"
       )}
     >
-      <div className="flex items-center gap-3">
-        <Checkbox
-          checked={todo.completed}
-          onChange={() => onToggle(todo.id)}
-        />
+      <div className={cn("flex items-center gap-3", isSelected && "bg-blue-50/50 -mx-4 px-4 py-2 rounded-lg")}>
+        {isSelectable ? (
+          <Checkbox
+            checked={isSelected}
+            onChange={() => onSelect?.()}
+          />
+        ) : (
+          <Checkbox
+            checked={todo.completed}
+            onChange={() => onToggle(todo.id)}
+          />
+        )}
 
         <span
           className={cn(
             "flex-1 text-gray-700 transition-all duration-300",
-            todo.completed && "line-through text-gray-400"
+            todo.completed && "text-gray-400"
           )}
         >
           {todo.text}

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { X, Plus, Edit2, Trash2, Folder, Check } from "lucide-react";
+import { createPortal } from "react-dom";
+import { X, Plus, Edit2, Trash2, Folder, Check, Star } from "lucide-react";
 import { Workspace } from "@/app/types";
 
 interface WorkspaceManagerProps {
@@ -23,6 +24,12 @@ interface WorkspaceManagerProps {
   onDelete: (id: string) => Promise<void>;
   /** 是否正在加载 */
   isLoading?: boolean;
+  /** 默认工作区 ID */
+  defaultWorkspaceId?: string | null;
+  /** 设置默认工作区 */
+  onSetDefault?: (workspaceId: string) => void;
+  /** 清除默认工作区 */
+  onClearDefault?: () => void;
 }
 
 const WORKSPACE_COLORS = [
@@ -50,6 +57,9 @@ export function WorkspaceManager({
   onUpdate,
   onDelete,
   isLoading = false,
+  defaultWorkspaceId,
+  onSetDefault,
+  onClearDefault,
 }: WorkspaceManagerProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -124,9 +134,13 @@ export function WorkspaceManager({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm pt-[100px]">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+  const modalContent = (
+    <div className="fixed inset-0 z-50">
+      {/* 遮罩层 - 全屏覆盖 */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      {/* 内容层 */}
+      <div className="relative z-10 flex items-start justify-center pt-[100px] h-full overflow-auto">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden mb-8">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <h2 className="text-lg font-semibold text-slate-800">管理工作区</h2>
@@ -210,7 +224,12 @@ export function WorkspaceManager({
                       <Folder className={`w-4 h-4 ${colorStyle.text}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-slate-800 truncate">{workspace.name}</div>
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium text-slate-800 truncate">{workspace.name}</span>
+                        {defaultWorkspaceId === workspace.id && (
+                          <Star className="w-3 h-3 text-amber-500 fill-amber-500" />
+                        )}
+                      </div>
                       <div className="text-xs text-slate-400">{workspace.path}</div>
                     </div>
                     <div className="flex items-center gap-1">
@@ -226,6 +245,26 @@ export function WorkspaceManager({
                         >
                           切换
                         </button>
+                      )}
+                      {/* 设为默认按钮 */}
+                      {onSetDefault && (
+                        defaultWorkspaceId === workspace.id ? (
+                          <button
+                            onClick={onClearDefault}
+                            className="p-1.5 text-amber-500 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors"
+                            title="取消默认"
+                          >
+                            <Star className="w-3.5 h-3.5 fill-amber-500" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => onSetDefault(workspace.id)}
+                            className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors"
+                            title="设为默认"
+                          >
+                            <Star className="w-3.5 h-3.5" />
+                          </button>
+                        )
                       )}
                       {workspace.id !== "root" && (
                         <>
@@ -301,9 +340,13 @@ export function WorkspaceManager({
             </button>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
+
+  // 使用 Portal 渲染到 body，避免父元素的 backdrop-filter 等属性影响 fixed 定位
+  return createPortal(modalContent, document.body);
 }
 
 export default WorkspaceManager;

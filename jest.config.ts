@@ -1,38 +1,58 @@
 import type { Config } from "jest";
 
 const config: Config = {
-  // 测试环境
-  testEnvironment: "jsdom",
-  
-  // 测试文件匹配模式
-  testMatch: [
-    "**/__tests__/**/*.test.ts",
-    "**/__tests__/**/*.test.tsx",
-  ],
-  
-  // 模块路径别名
-  moduleNameMapper: {
-    "^@/(.*)$": "<rootDir>/$1",
-  },
-  
-  // 转换器
-  transform: {
-    "^.+\\.tsx?$": ["ts-jest", {
-      tsconfig: {
-        jsx: "react-jsx",
-        esModuleInterop: true,
+  // 使用 projects 来区分不同类型的测试
+  projects: [
+    {
+      displayName: "api",
+      testMatch: [
+        "<rootDir>/__tests__/api/todos.route.test.ts",
+        "<rootDir>/__tests__/api/tags.route.test.ts",
+        "<rootDir>/__tests__/api/workspaces.route.test.ts",
+      ],
+      testEnvironment: "node",
+      moduleNameMapper: {
+        "^@/(.*)$": "<rootDir>/$1",
       },
-    }],
-  },
-  
-  // 转换忽略模式
-  transformIgnorePatterns: [
-    "/node_modules/",
+      transform: {
+        "^.+\\.tsx?$": ["ts-jest", {
+          tsconfig: {
+            jsx: "react-jsx",
+            esModuleInterop: true,
+          },
+        }],
+      },
+      setupFilesAfterEnv: ["<rootDir>/__tests__/api/setup.ts"],
+      moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
+    },
+    {
+      displayName: "components",
+      testMatch: [
+        "<rootDir>/__tests__/components/**/*.test.tsx",
+        "<rootDir>/__tests__/db/**/*.test.ts",
+        "<rootDir>/__tests__/api/client.test.ts",
+      ],
+      testEnvironment: "jsdom",
+      moduleNameMapper: {
+        "^@/(.*)$": "<rootDir>/$1",
+      },
+      transform: {
+        "^.+\\.tsx?$": ["ts-jest", {
+          tsconfig: {
+            jsx: "react-jsx",
+            esModuleInterop: true,
+          },
+        }],
+      },
+      setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
+      testPathIgnorePatterns: [
+        "/node_modules/",
+        "/.next/",
+      ],
+      moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
+    },
   ],
-  
-  // 测试前运行的设置文件
-  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
-  
+
   // 覆盖率配置
   collectCoverageFrom: [
     "lib/**/*.ts",
@@ -49,15 +69,12 @@ const config: Config = {
       statements: 70,
     },
   },
-  
+
   // 忽略的路径
   testPathIgnorePatterns: [
     "/node_modules/",
     "/.next/",
   ],
-  
-  // 模块文件扩展名
-  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
 };
 
 export default config;

@@ -17,28 +17,28 @@ export const TagColorSchema = z.enum([
 // ==================== Todo 工具 ====================
 
 export const GetTodosSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于指定任务所属工作区"),
   status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
   tagId: z.string().optional().describe("按标签筛选"),
   includeSubTasks: z.boolean().optional().describe("是否包含子任务"),
-  workspace: z.string().optional().describe("工作区路径，不传则获取所有工作区的任务"),
 });
 
 export const CreateTodoSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于指定任务所属工作区"),
   text: z.string().min(1).describe("任务内容"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
-  workspace: z.string().optional().describe("工作区路径，默认为根目录/"),
   status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
 });
 
 export const UpdateTodoSchema = z.object({
   id: z.string().describe("任务ID"),
+  workspaceId: z.string().describe("工作区ID，用于指定任务所属工作区"),
   text: z.string().min(1).optional().describe("任务内容"),
   completed: z.boolean().optional().describe("完成状态"),
   status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
-  workspace: z.string().optional().describe("工作区路径"),
 });
 
 export const DeleteTodoSchema = z.object({
@@ -93,10 +93,12 @@ export const DeleteTagSchema = z.object({
 // ==================== 子任务工具 ====================
 
 export const GetSubTasksSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于验证任务归属"),
   todoId: z.string().describe("所属任务ID"),
 });
 
 export const CreateSubTaskSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于验证任务归属"),
   todoId: z.string().describe("所属任务ID"),
   text: z.string().min(1).describe("子任务内容"),
 });
@@ -132,21 +134,21 @@ export const UpdateSubTaskArtifactSchema = z.object({
 // ==================== 搜索工具 ====================
 
 export const SearchTodosSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于指定搜索范围"),
   keyword: z.string().min(1).describe("搜索关键词，支持模糊匹配任务标题"),
-  workspace: z.string().optional().describe("工作区路径，不传则搜索所有工作区"),
   status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
 });
 
 export const GetTodosByTagSchema = z.object({
+  workspaceId: z.string().describe("工作区ID，用于指定查询范围"),
   tagId: z.string().describe("标签ID"),
-  workspace: z.string().optional().describe("工作区路径，不传则搜索所有工作区"),
   status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
 });
 
 // ==================== 统计工具 ====================
 
 export const GetStatsSchema = z.object({
-  workspace: z.string().optional().describe("工作区路径，不传则统计所有工作区"),
+  workspaceId: z.string().describe("工作区ID，用于指定统计范围"),
 });
 
 // ==================== 工具名称常量 ====================
@@ -199,17 +201,17 @@ export const toolDefinitions: ToolDefinition[] = [
   // Todo 管理
   {
     name: ToolName.GET_TODOS,
-    description: "获取任务列表，支持按状态、标签筛选，可通过 workspace 参数指定工作区路径",
+    description: "获取指定工作区的任务列表，支持按状态、标签筛选。workspaceId 为必传参数，需先调用 get_workspaces 获取可用的 workspaceId",
     schema: GetTodosSchema,
   },
   {
     name: ToolName.CREATE_TODO,
-    description: "创建新任务，使用 workspace 参数指定工作区路径（如 /project-a），不指定则创建在根目录",
+    description: "在指定工作区创建新任务。workspaceId 为必传参数，需先调用 get_workspaces 获取可用的 workspaceId",
     schema: CreateTodoSchema,
   },
   {
     name: ToolName.UPDATE_TODO,
-    description: "更新任务信息，可通过 workspace 参数修改任务所属工作区",
+    description: "更新指定工作区的任务信息。workspaceId 为必传参数，用于验证任务归属",
     schema: UpdateTodoSchema,
   },
   {
@@ -270,12 +272,12 @@ export const toolDefinitions: ToolDefinition[] = [
   // 子任务管理
   {
     name: ToolName.GET_SUBTASKS,
-    description: "获取任务的子任务列表",
+    description: "获取指定工作区任务的子任务列表。workspaceId 为必传参数，用于验证任务归属",
     schema: GetSubTasksSchema,
   },
   {
     name: ToolName.CREATE_SUBTASK,
-    description: "为任务创建子任务",
+    description: "为指定工作区的任务创建子任务。workspaceId 为必传参数，用于验证任务归属",
     schema: CreateSubTaskSchema,
   },
   {
@@ -309,19 +311,19 @@ export const toolDefinitions: ToolDefinition[] = [
   // 搜索
   {
     name: ToolName.SEARCH_TODOS,
-    description: "模糊搜索任务标题，支持关键词匹配",
+    description: "在指定工作区内模糊搜索任务标题。workspaceId 为必传参数，需先调用 get_workspaces 获取",
     schema: SearchTodosSchema,
   },
   {
     name: ToolName.GET_TODOS_BY_TAG,
-    description: "通过标签ID查询任务列表",
+    description: "在指定工作区内通过标签ID查询任务列表。workspaceId 为必传参数",
     schema: GetTodosByTagSchema,
   },
   
   // 统计
   {
     name: ToolName.GET_STATS,
-    description: "获取任务统计信息，可指定 workspace 参数按工作区统计",
+    description: "获取指定工作区的任务统计信息。workspaceId 为必传参数",
     schema: GetStatsSchema,
   },
 ];

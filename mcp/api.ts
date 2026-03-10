@@ -18,7 +18,7 @@ type Todo = {
   tagIds: string[];
   subTasks?: SubTask[];
   artifact?: string;
-  workspacePath?: string;
+  workspaceId?: string;
 };
 
 type Tag = {
@@ -94,13 +94,13 @@ export interface TodoFilters {
 export const todoApi = {
   /**
    * 获取任务列表
-   * @param workspacePath - 可选的工作区路径，不传则获取所有任务
+   * @param workspaceId - 可选的工作区ID，不传则获取所有任务
    * @param filters - 可选的筛选条件
    */
-  getAll(workspacePath?: string, filters?: TodoFilters): Promise<Todo[]> {
+  getAll(workspaceId?: string, filters?: TodoFilters): Promise<Todo[]> {
     const params = new URLSearchParams();
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     if (filters?.status) {
       params.append("status", filters.status);
@@ -116,20 +116,20 @@ export const todoApi = {
     return fetchJson(`/api/todos/${id}`);
   },
 
-  getByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+  getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return fetchJson(`/api/todos?${params.toString()}`);
   },
 
-  getByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+  getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return fetchJson(`/api/todos?${params.toString()}`);
   },
@@ -147,7 +147,7 @@ export const todoApi = {
     completed?: boolean; 
     tagIds?: string[]; 
     artifact?: string;
-    workspacePath?: string;
+    workspaceId?: string;
   }): Promise<Todo> {
     return fetchJson(`/api/todos`, {
       method: "POST",

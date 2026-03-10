@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { Todo, Tag, TodoFilterStatus, Workspace } from "@/app/types";
+import { useState, useMemo, useCallback, FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { Todo, Tag, TodoFilterStatus, Workspace, TagColor } from "@/app/types";
 import { cn } from "@/lib/utils";
-import { TodoInput } from "./TodoInput";
 import { TodoItem } from "./TodoItem";
 import { TodoFilter } from "./TodoFilter";
 import { TodoMonitor } from "./TodoMonitor";
 import { EmptyState } from "@/app/components/ui/EmptyState";
 import { Button } from "@/app/components/ui/Button";
-import { WorkspaceSelector, WorkspaceManager } from "@/app/components/workspace";
+import { WorkspaceManager } from "@/app/components/workspace";
 import { useTodos } from "@/lib/hooks/useTodos";
 import { useTaskAnalyzer, TaskAnalysisResult } from "@/lib/hooks/useTaskAnalyzer";
 import { TaskAnalysisModal } from "./TaskAnalysisModal";
-import { Folder, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import { Folder, ChevronLeft, ChevronRight, Monitor, Plus, X, Trash2, CheckSquare, Square } from "lucide-react";
 
 // 监控面板展开状态存储键
 const MONITOR_EXPANDED_KEY = "todolist-monitor-expanded";
@@ -79,13 +79,30 @@ export function TodoList() {
     deleteWorkspace,
     refreshWorkspaces,
     
+    // 默认工作区操作
+    defaultWorkspaceId,
+    setDefaultWorkspace,
+    clearDefaultWorkspace,
+    
     // 分页操作
     goToPage,
     loadMore,
     refresh,
+    batchDeleteTodos,
   } = useTodos();
 
   const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newTaskText, setNewTaskText] = useState("");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [isCreatingTag, setIsCreatingTag] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState<TagColor>("emerald");
+  
+  // 批量选择状态
+  const [selectedTodoIds, setSelectedTodoIds] = useState<string[]>([]);
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  
   const [isMonitorExpanded, setIsMonitorExpanded] = useState(() => {
     // 从 localStorage 读取之前的展开状态
     if (typeof window !== "undefined") {
@@ -102,6 +119,71 @@ export function TodoList() {
       return newValue;
     });
   }, []);
+
+  // 处理添加任务
+  const handleAddTask = useCallback((e: FormEvent) => {
+    e.preventDefault();
+    if (newTaskText.trim()) {
+      addTodo(newTaskText.trim(), selectedTagIds, currentWorkspace.id);
+      setNewTaskText("");
+      setSelectedTagIds([]);
+      setIsAddModalOpen(false);
+    }
+  }, [newTaskText, selectedTagIds, currentWorkspace.id, addTodo]);
+
+  // 处理创建标签
+  const handleCreateTag = useCallback(() => {
+    if (newTagName.trim()) {
+      createTag(newTagName.trim(), newTagColor);
+      setNewTagName("");
+      setIsCreatingTag(false);
+    }
+  }, [newTagName, newTagColor, createTag]);
+
+  // 切换标签选择
+  const toggleTag = useCallback((tagId: string) => {
+    setSelectedTagIds(prev => 
+      prev.includes(tagId) 
+        ? prev.filter(id => id !== tagId)
+        : [...prev, tagId]
+    );
+  }, []);
+
+  // 批量选择相关函数
+  const toggleTodoSelection = useCallback((todoId: string) => {
+    setSelectedTodoIds(prev => 
+      prev.includes(todoId)
+        ? prev.filter(id => id !== todoId)
+        : [...prev, todoId]
+    );
+  }, []);
+
+  const selectAllTodos = useCallback(() => {
+    if (selectedTodoIds.length === todos.length) {
+      setSelectedTodoIds([]);
+    } else {
+      setSelectedTodoIds(todos.map(t => t.id));
+    }
+  }, [todos, selectedTodoIds.length]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedTodoIds([]);
+    setIsBatchMode(false);
+  }, []);
+
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedTodoIds.length === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedTodoIds.length} 个任务吗？`)) return;
+    
+    try {
+      await batchDeleteTodos(selectedTodoIds);
+      setSelectedTodoIds([]);
+      setIsBatchMode(false);
+    } catch (err) {
+      console.error("Failed to batch delete:", err);
+      alert("批量删除失败");
+    }
+  }, [selectedTodoIds, batchDeleteTodos]);
   
   // 任务分析相关
   const {
@@ -248,11 +330,18 @@ export function TodoList() {
         />
       )}
 
-      <TodoInput
-        availableTags={tags}
-        onAdd={(text, tagIds) => addTodo(text, tagIds, currentWorkspace.path)}
-        onCreateTag={createTag}
-      />
+      {/* 悬浮添加按钮 (FAB) - 使用 Portal 确保固定在视口右下角 */}
+      {createPortal(
+        <button
+          onClick={() => setIsAddModalOpen(true)}
+          className="fixed bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center z-[9999]"
+          style={{ position: 'fixed' }}
+          aria-label="添加新任务"
+        >
+          <Plus className="w-7 h-7" />
+        </button>,
+        document.body
+      )}
 
       <TodoFilter
         currentStatus={filters.status}
@@ -262,6 +351,67 @@ export function TodoList() {
         onTagFilterChange={setTagFilter}
         availableTags={tags}
       />
+
+      {/* 批量操作工具栏 */}
+      {todos.length > 0 && (
+        <div className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg">
+          <div className="flex items-center gap-3">
+            {!isBatchMode ? (
+              <button
+                onClick={() => setIsBatchMode(true)}
+                className="text-sm text-slate-600 hover:text-slate-800 flex items-center gap-1.5"
+              >
+                <CheckSquare className="w-4 h-4" />
+                批量选择
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={selectAllTodos}
+                  className="text-sm text-slate-600 hover:text-slate-800 flex items-center gap-1.5"
+                >
+                  {selectedTodoIds.length === todos.length ? (
+                    <>
+                      <Square className="w-4 h-4" />
+                      取消全选
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="w-4 h-4" />
+                      全选 ({todos.length})
+                    </>
+                  )}
+                </button>
+                {selectedTodoIds.length > 0 && (
+                  <span className="text-sm text-slate-500">
+                    已选 {selectedTodoIds.length} 项
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          
+          {isBatchMode && (
+            <div className="flex items-center gap-2">
+              {selectedTodoIds.length > 0 && (
+                <button
+                  onClick={handleBatchDelete}
+                  className="text-sm text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  删除
+                </button>
+              )}
+              <button
+                onClick={clearSelection}
+                className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-md transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-3">
         {todos.length === 0 ? (
@@ -291,6 +441,10 @@ export function TodoList() {
               onUpdateSubTaskArtifact={updateSubTaskArtifact}
               onUpdateArtifact={updateTodoArtifact}
               onAnalyze={handleAnalyze}
+              // 批量选择相关
+              isSelectable={isBatchMode}
+              isSelected={selectedTodoIds.includes(todo.id)}
+              onSelect={() => toggleTodoSelection(todo.id)}
             />
           ))
         )}
@@ -361,6 +515,9 @@ export function TodoList() {
         onUpdate={updateWorkspace}
         onDelete={deleteWorkspace}
         isLoading={isLoading}
+        defaultWorkspaceId={defaultWorkspaceId}
+        onSetDefault={setDefaultWorkspace}
+        onClearDefault={clearDefaultWorkspace}
       />
 
       {/* 任务分析弹窗 */}
@@ -376,6 +533,243 @@ export function TodoList() {
         error={analyzeError}
         onApplySubTasks={handleApplySubTasks}
       />
+
+      {/* 添加任务弹窗 */}
+      {isAddModalOpen && (
+        <AddTaskModal
+          isOpen={isAddModalOpen}
+          onClose={() => {
+            setIsAddModalOpen(false);
+            setNewTaskText("");
+            setSelectedTagIds([]);
+            setIsCreatingTag(false);
+            setNewTagName("");
+          }}
+          newTaskText={newTaskText}
+          setNewTaskText={setNewTaskText}
+          selectedTagIds={selectedTagIds}
+          toggleTag={toggleTag}
+          availableTags={tags}
+          isCreatingTag={isCreatingTag}
+          setIsCreatingTag={setIsCreatingTag}
+          newTagName={newTagName}
+          setNewTagName={setNewTagName}
+          newTagColor={newTagColor}
+          setNewTagColor={setNewTagColor}
+          handleCreateTag={handleCreateTag}
+          handleAddTask={handleAddTask}
+        />
+      )}
     </div>
   );
+}
+
+// 添加任务弹窗组件
+interface AddTaskModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  newTaskText: string;
+  setNewTaskText: (text: string) => void;
+  selectedTagIds: string[];
+  toggleTag: (tagId: string) => void;
+  availableTags: Tag[];
+  isCreatingTag: boolean;
+  setIsCreatingTag: (value: boolean) => void;
+  newTagName: string;
+  setNewTagName: (name: string) => void;
+  newTagColor: TagColor;
+  setNewTagColor: (color: TagColor) => void;
+  handleCreateTag: () => void;
+  handleAddTask: (e: FormEvent) => void;
+}
+
+function AddTaskModal({
+  isOpen,
+  onClose,
+  newTaskText,
+  setNewTaskText,
+  selectedTagIds,
+  toggleTag,
+  availableTags,
+  isCreatingTag,
+  setIsCreatingTag,
+  newTagName,
+  setNewTagName,
+  newTagColor,
+  setNewTagColor,
+  handleCreateTag,
+  handleAddTask,
+}: AddTaskModalProps) {
+  if (!isOpen) return null;
+
+  const modalContent = (
+    <div className="fixed inset-0 z-50">
+      {/* 遮罩层 */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      
+      {/* 内容层 */}
+      <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+          {/* 头部 */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 className="text-lg font-semibold text-gray-800">添加新任务</h2>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <form onSubmit={handleAddTask} className="p-6 space-y-6">
+            {/* 任务输入 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                任务内容
+              </label>
+              <textarea
+                value={newTaskText}
+                onChange={(e) => setNewTaskText(e.target.value)}
+                placeholder="输入任务描述..."
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-300 resize-none"
+                rows={3}
+                autoFocus
+              />
+            </div>
+
+            {/* 标签选择 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                选择标签
+              </label>
+              
+              {/* 已选标签 */}
+              {selectedTagIds.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {selectedTagIds.map((tagId) => {
+                    const tag = availableTags.find((t) => t.id === tagId);
+                    if (!tag) return null;
+                    return (
+                      <span
+                        key={tagId}
+                        className={cn(
+                          "inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm",
+                          getTagColorStyle(tag.color).bg,
+                          getTagColorStyle(tag.color).text
+                        )}
+                      >
+                        {tag.name}
+                        <button
+                          type="button"
+                          onClick={() => toggleTag(tagId)}
+                          className="ml-1 hover:bg-black/10 rounded-full p-0.5 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 可选标签 */}
+              <div className="flex flex-wrap gap-2">
+                {availableTags
+                  .filter((tag) => !selectedTagIds.includes(tag.id))
+                  .map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className="px-3 py-1.5 rounded-full text-sm border border-gray-200 text-gray-600 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                    >
+                      + {tag.name}
+                    </button>
+                  ))}
+              </div>
+
+              {/* 创建新标签 */}
+              <div className="mt-4">
+                {!isCreatingTag ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingTag(true)}
+                    className="text-sm text-gray-500 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    新建标签
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <input
+                      type="text"
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      placeholder="标签名称"
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                      autoFocus
+                    />
+                    <div className="flex gap-1">
+                      {["emerald", "blue", "violet", "rose", "amber", "cyan"].map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setNewTagColor(color as TagColor)}
+                          className={cn(
+                            "w-6 h-6 rounded-full transition-all",
+                            getTagColorStyle(color as TagColor).bg,
+                            newTagColor === color && "ring-2 ring-offset-1 ring-gray-400"
+                          )}
+                        />
+                      ))}
+                    </div>
+                    <Button type="button" size="sm" onClick={handleCreateTag} disabled={!newTagName.trim()}>
+                      创建
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setIsCreatingTag(false)}>
+                      取消
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="flex gap-3 pt-4 border-t border-gray-100">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={onClose}
+              >
+                取消
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={!newTaskText.trim()}
+              >
+                添加任务
+              </Button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(modalContent, document.body);
+}
+
+// 辅助函数
+function getTagColorStyle(color: TagColor) {
+  const colors: Record<TagColor, { bg: string; text: string }> = {
+    emerald: { bg: "bg-emerald-100", text: "text-emerald-700" },
+    blue: { bg: "bg-blue-100", text: "text-blue-700" },
+    violet: { bg: "bg-violet-100", text: "text-violet-700" },
+    rose: { bg: "bg-rose-100", text: "text-rose-700" },
+    amber: { bg: "bg-amber-100", text: "text-amber-700" },
+    cyan: { bg: "bg-cyan-100", text: "text-cyan-700" },
+  };
+  return colors[color];
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { Button } from "@/app/components/ui/Button";
 import { Card } from "@/app/components/ui/Card";
 import { TaskAnalysisResult } from "@/lib/hooks/useTaskAnalyzer";
@@ -36,7 +37,7 @@ export function TaskAnalysisModal({
     low: "bg-blue-100 text-blue-700 border-blue-200",
   };
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-auto">
         <div className="p-6">
@@ -177,4 +178,7 @@ export function TaskAnalysisModal({
       </Card>
     </div>
   );
+
+  // 使用 Portal 渲染到 body，避免父元素的 backdrop-filter 等属性影响 fixed 定位
+  return createPortal(modalContent, document.body);
 }

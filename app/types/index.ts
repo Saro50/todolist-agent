@@ -54,7 +54,7 @@ export interface Todo {
   tagIds: string[];      // 关联的标签 ID 列表
   children?: Todo[];     // 子任务列表（可选，加载时填充）
   artifact?: string;     // 产物：Markdown 报告
-  workspacePath: string; // 工作目录路径：任务所属的工作空间
+  workspaceId?: string;  // 工作区 ID（V3：只给主任务，子任务跟随父任务）
   sortOrder?: number;    // 排序序号（子任务用）
 }
 
@@ -107,7 +107,7 @@ export interface CreateTodoInput {
   completed?: boolean;  // 可选，会从 status 派生
   tagIds?: string[];
   artifact?: string;
-  workspacePath?: string;
+  workspaceId?: string;  // V3: 使用 workspaceId 而不是 workspacePath
 }
 
 // 更新任务输入
@@ -118,4 +118,5 @@ export interface UpdateTodoInput {
   tagIds?: string[];
   artifact?: string;
   sortOrder?: number;
+  workspaceId?: string;  // V3: 支持修改工作区
 }

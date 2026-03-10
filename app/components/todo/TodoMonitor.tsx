@@ -134,7 +134,7 @@ export function TodoMonitor({
     try {
       // 只获取第一页的任务用于比较（优化性能）
       const result = await api.todos.getAllPaginated(
-        currentWorkspace.path,
+        currentWorkspace.id,
         1,
         50 // 最多比较前50个任务
       );
@@ -174,7 +174,7 @@ export function TodoMonitor({
       }));
       return null;
     }
-  }, [currentWorkspace.path, detectChanges, onRefresh, state.isChecking]);
+  }, [currentWorkspace.id, detectChanges, onRefresh, state.isChecking]);
 
   // 切换自动刷新
   const toggleAutoRefresh = useCallback(() => {

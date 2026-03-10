@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     // 筛选参数
     const tagId = searchParams.get("tag");
     const completed = searchParams.get("completed");
-    const workspace = searchParams.get("workspace");
+    const workspaceId = searchParams.get("workspace");
     const status = searchParams.get("status"); // pending/in_progress/completed
     
     // 分页参数
@@ -24,13 +24,13 @@ export async function GET(request: NextRequest) {
 
     // 兼容旧 API：如果只传 completed，使用旧方法
     if (completed !== null && !status && !tagId) {
-      const todos = await db.todos.findByStatus(completed === "true", workspace || undefined);
+      const todos = await db.todos.findByStatus(completed === "true", workspaceId || undefined);
       return NextResponse.json(todos);
     }
 
     // 兼容旧 API：如果只传 tag，使用旧方法
     if (tagId && !usePagination && !status) {
-      const todos = await db.todos.findByTag(tagId, workspace || undefined);
+      const todos = await db.todos.findByTag(tagId, workspaceId || undefined);
       return NextResponse.json(todos);
     }
 
@@ -52,14 +52,14 @@ export async function GET(request: NextRequest) {
     // 是否使用分页
     if (usePagination) {
       const result = await db.todos.findAllPaginated(
-        workspace || undefined,
+        workspaceId || undefined,
         { page: validPage, pageSize: validPageSize },
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return NextResponse.json(result);
     } else {
       // 不分页，但支持筛选
-      const todos = await db.todos.findAll(workspace || undefined);
+      const todos = await db.todos.findAll(workspaceId || undefined);
       
       // 手动筛选（当不分页时）
       let filteredTodos = todos;
@@ -87,22 +87,18 @@ export async function POST(request: NextRequest) {
     const db = await ensureConnected();
     const data = await request.json();
 
-    console.log(`[API POST /todos] 收到数据:`, JSON.stringify(data));
-
     // 确定状态：优先使用传入的 status，否则根据 completed 计算
     const status = data.status || (data.completed ? "completed" : "pending");
-    const workspacePath = data.workspacePath || "/";
     
-    console.log(`[API POST /todos] 处理后的 workspacePath: ${workspacePath}`);
-
+    // 使用传入的 workspaceId，默认为 root
+    const workspaceId = data.workspaceId || 'root';
+    
     const todo = await db.todos.create({
       text: data.text,
       status,
       tagIds: data.tagIds || [],
-      workspacePath,
+      workspaceId,
     });
-
-    console.log(`[API POST /todos] 创建成功: ${todo.id}, 工作区: ${todo.workspacePath}`);
 
     return NextResponse.json(todo, { status: 201 });
   } catch (error) {

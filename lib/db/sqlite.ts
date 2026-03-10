@@ -37,7 +37,7 @@ import {
 class SQLiteTodoRepository implements ITodoRepository {
   constructor(private db: Database.Database) {}
 
-  async findAll(workspacePath?: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
+  async findAll(workspaceId?: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
@@ -46,9 +46,11 @@ class SQLiteTodoRepository implements ITodoRepository {
     const conditions: string[] = [];
     const params: any[] = [];
     
-    if (workspacePath) {
-      conditions.push(`t.workspace_path = ?`);
-      params.push(workspacePath);
+    // V3: 使用关系表查询工作区
+    if (workspaceId) {
+      sql += ` JOIN todo_workspaces tw ON t.id = tw.todo_id`;
+      conditions.push(`tw.workspace_id = ?`);
+      params.push(workspaceId);
     }
     
     if (type) {
@@ -68,7 +70,7 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   async findAllPaginated(
-    workspacePath?: string, 
+    workspaceId?: string, 
     pagination?: { page: number; pageSize: number },
     filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }
   ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
@@ -76,53 +78,50 @@ class SQLiteTodoRepository implements ITodoRepository {
     const pageSize = pagination?.pageSize || 20;
     const offset = (page - 1) * pageSize;
 
-    // 构建 WHERE 子句
-    const whereConditions: string[] = [];
-    const whereParams: any[] = [];
+    // 获取总数
+    const total = await this.count(workspaceId, filters);
+    const totalPages = Math.ceil(total / pageSize);
+
+    // 构建查询
+    let fromClause = `FROM todos t`;
+    const joins: string[] = [];
+    const conditions: string[] = [];
+    const params: any[] = [];
     
-    if (workspacePath) {
-      whereConditions.push(`t.workspace_path = ?`);
-      whereParams.push(workspacePath);
+    // V3: 使用关系表查询工作区
+    if (workspaceId) {
+      joins.push(`JOIN todo_workspaces tw ON t.id = tw.todo_id`);
+      conditions.push(`tw.workspace_id = ?`);
+      params.push(workspaceId);
     }
     
     if (filters?.status) {
-      whereConditions.push(`t.status = ?`);
-      whereParams.push(filters.status);
+      conditions.push(`t.status = ?`);
+      params.push(filters.status);
     }
 
     if (filters?.type) {
-      whereConditions.push(`t.type = ?`);
-      whereParams.push(filters.type);
+      conditions.push(`t.type = ?`);
+      params.push(filters.type);
     }
 
-    const whereClause = whereConditions.length > 0 
-      ? `WHERE ${whereConditions.join(' AND ')}` 
-      : '';
-
-    // 如果有标签筛选，使用子查询
-    let tagJoin = '';
-    let tagWhere = '';
     if (filters?.tagId) {
-      tagJoin = `INNER JOIN todo_tags tt_filter ON t.id = tt_filter.todo_id`;
-      tagWhere = `AND tt_filter.tag_id = ?`;
-      whereParams.push(filters.tagId);
+      joins.push(`JOIN todo_tags tt_filter ON t.id = tt_filter.todo_id AND tt_filter.tag_id = ?`);
+      params.push(filters.tagId);
     }
 
-    // 获取总数
-    const total = await this.count(workspacePath, filters);
-    const totalPages = Math.ceil(total / pageSize);
+    const whereClause = conditions.length > 0 
+      ? `WHERE ${conditions.join(' AND ')}` 
+      : '';
 
     // 获取分页数据
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
-      FROM todos t
-      ${tagJoin}
+      ${fromClause}
+      ${joins.join(' ')}
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
       ${whereClause}
-      ${tagWhere}
     `;
-    
-    const params = [...whereParams];
     
     sql += ` GROUP BY t.id ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
     params.push(pageSize, offset);
@@ -139,60 +138,43 @@ class SQLiteTodoRepository implements ITodoRepository {
     };
   }
 
-  async count(workspacePath?: string, filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }): Promise<number> {
-    // 如果有标签筛选，使用子查询
-    if (filters?.tagId) {
-      let sql = `
-        SELECT COUNT(DISTINCT t.id) as count 
-        FROM todos t
-        INNER JOIN todo_tags tt ON t.id = tt.todo_id
-        WHERE tt.tag_id = ?
-      `;
-      const params: any[] = [filters.tagId];
-      
-      if (workspacePath) {
-        sql += ` AND t.workspace_path = ?`;
-        params.push(workspacePath);
-      }
-      
-      if (filters?.status) {
-        sql += ` AND t.status = ?`;
-        params.push(filters.status);
-      }
-
-      if (filters?.type) {
-        sql += ` AND t.type = ?`;
-        params.push(filters.type);
-      }
-      
-      const stmt = this.db.prepare(sql);
-      const row = stmt.get(...params) as any;
-      return row?.count || 0;
+  async count(workspaceId?: string, filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }): Promise<number> {
+    // 构建查询
+    let fromClause = `FROM todos t`;
+    const joins: string[] = [];
+    const conditions: string[] = [];
+    const params: any[] = [];
+    
+    // V3: 使用关系表查询工作区
+    if (workspaceId) {
+      joins.push(`JOIN todo_workspaces tw ON t.id = tw.todo_id`);
+      conditions.push(`tw.workspace_id = ?`);
+      params.push(workspaceId);
     }
     
-    // 普通计数
-    let sql = `SELECT COUNT(*) as count FROM todos`;
-    const params: any[] = [];
-    const conditions: string[] = [];
-    
-    if (workspacePath) {
-      conditions.push(`workspace_path = ?`);
-      params.push(workspacePath);
+    if (filters?.tagId) {
+      joins.push(`JOIN todo_tags tt ON t.id = tt.todo_id AND tt.tag_id = ?`);
+      params.push(filters.tagId);
     }
     
     if (filters?.status) {
-      conditions.push(`status = ?`);
+      conditions.push(`t.status = ?`);
       params.push(filters.status);
     }
 
     if (filters?.type) {
-      conditions.push(`type = ?`);
+      conditions.push(`t.type = ?`);
       params.push(filters.type);
     }
     
-    if (conditions.length > 0) {
-      sql += ` WHERE ${conditions.join(' AND ')}`;
-    }
+    const whereClause = conditions.length > 0 
+      ? `WHERE ${conditions.join(' AND ')}` 
+      : '';
+    
+    // 如果有标签或工作区筛选，需要去重计数
+    const distinctModifier = (filters?.tagId || workspaceId) ? 'DISTINCT' : '';
+    
+    const sql = `SELECT COUNT(${distinctModifier} t.id) as count ${fromClause} ${joins.join(' ')} ${whereClause}`;
     
     const stmt = this.db.prepare(sql);
     const row = stmt.get(...params) as any;
@@ -212,7 +194,7 @@ class SQLiteTodoRepository implements ITodoRepository {
     return row ? this.rowToTodo(row) : null;
   }
 
-  async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+  async findByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt2.tag_id) as tag_ids
       FROM todos t
@@ -221,9 +203,11 @@ class SQLiteTodoRepository implements ITodoRepository {
     `;
     const params: any[] = [tagId];
     
-    if (workspacePath) {
-      sql += ` WHERE t.workspace_path = ?`;
-      params.push(workspacePath);
+    // V3: 使用关系表查询工作区
+    if (workspaceId) {
+      sql += ` JOIN todo_workspaces tw ON t.id = tw.todo_id`;
+      sql += ` WHERE tw.workspace_id = ?`;
+      params.push(workspaceId);
     }
     
     sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
@@ -254,14 +238,16 @@ class SQLiteTodoRepository implements ITodoRepository {
     return rows.map(this.rowToTodo);
   }
 
-  async findByWorkspace(workspacePath: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
+  async findByWorkspace(workspaceId: string, type?: 'task' | 'subtask'): Promise<Todo[]> {
+    // V3: 使用关系表查询工作区
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
+      JOIN todo_workspaces tw ON t.id = tw.todo_id
       LEFT JOIN todo_tags tt ON t.id = tt.todo_id
-      WHERE t.workspace_path = ?
+      WHERE tw.workspace_id = ?
     `;
-    const params: any[] = [workspacePath];
+    const params: any[] = [workspaceId];
     
     if (type) {
       sql += ` AND t.type = ?`;
@@ -359,15 +345,16 @@ class SQLiteTodoRepository implements ITodoRepository {
     const id = Date.now().toString();
     const createdAt = new Date();
     const updatedAt = createdAt;
-    const workspacePath = input.workspacePath || "/";
+    const workspaceId = input.workspaceId || "root";
     const type = input.type || "task";
     // 从 status 派生 completed，或从 completed 派生 status
     const status = input.status || "pending";
     const completed = status === "completed";
 
+    // V3: 不再插入 workspace_path，使用关系表
     const insertTodo = this.db.prepare(`
-      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, workspace_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertTodo.run(
@@ -378,9 +365,16 @@ class SQLiteTodoRepository implements ITodoRepository {
       completed ? 1 : 0, 
       createdAt.toISOString(), 
       updatedAt.toISOString(),
-      input.artifact || null,
-      workspacePath
+      input.artifact || null
     );
+
+    // V3: 插入工作区关系（只给主任务关联工作区，子任务跟随主任务）
+    if (type === 'task') {
+      const insertWorkspaceRelation = this.db.prepare(`
+        INSERT INTO todo_workspaces (todo_id, workspace_id) VALUES (?, ?)
+      `);
+      insertWorkspaceRelation.run(id, workspaceId);
+    }
 
     // 插入标签关联
     if (input.tagIds && input.tagIds.length > 0) {
@@ -402,7 +396,7 @@ class SQLiteTodoRepository implements ITodoRepository {
       updatedAt,
       tagIds: input.tagIds || [],
       artifact: input.artifact,
-      workspacePath,
+      workspaceId,
     };
   }
 
@@ -514,6 +508,9 @@ class SQLiteTodoRepository implements ITodoRepository {
     const allIdList = Array.from(allIds);
     const allPlaceholders = allIdList.map(() => "?").join(",");
     
+    // V3: 删除工作区关系
+    this.db.prepare(`DELETE FROM todo_workspaces WHERE todo_id IN (${allPlaceholders})`).run(...allIdList);
+    
     // 删除关系
     this.db.prepare(`DELETE FROM todo_relations WHERE parent_id IN (${allPlaceholders}) OR child_id IN (${allPlaceholders})`).run(...allIdList, ...allIdList);
 
@@ -529,14 +526,21 @@ class SQLiteTodoRepository implements ITodoRepository {
     return result.changes;
   }
 
-  async clearCompleted(workspacePath?: string): Promise<number> {
+  async clearCompleted(workspaceId?: string): Promise<number> {
     // 获取已完成的任务 ID
-    let sql = "SELECT id FROM todos WHERE completed = 1";
+    let sql: string;
     const params: any[] = [];
     
-    if (workspacePath) {
-      sql += " AND workspace_path = ?";
-      params.push(workspacePath);
+    if (workspaceId) {
+      // V3: 使用关系表查询
+      sql = `
+        SELECT t.id FROM todos t
+        JOIN todo_workspaces tw ON t.id = tw.todo_id
+        WHERE t.completed = 1 AND tw.workspace_id = ?
+      `;
+      params.push(workspaceId);
+    } else {
+      sql = "SELECT id FROM todos WHERE completed = 1";
     }
     
     const findStmt = this.db.prepare(sql);
@@ -547,14 +551,15 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   async getAllWorkspaces(): Promise<string[]> {
+    // V3: 从关系表查询工作区
     const stmt = this.db.prepare(`
-      SELECT DISTINCT workspace_path 
-      FROM todos 
-      WHERE workspace_path IS NOT NULL 
-      ORDER BY workspace_path
+      SELECT DISTINCT w.id 
+      FROM workspaces w
+      JOIN todo_workspaces tw ON w.id = tw.workspace_id
+      ORDER BY w.path
     `);
-    const rows = stmt.all() as { workspace_path: string }[];
-    return rows.map(r => r.workspace_path);
+    const rows = stmt.all() as { id: string }[];
+    return rows.map(r => r.id);
   }
 
   async addTag(todoId: string, tagId: string): Promise<boolean> {
@@ -614,7 +619,7 @@ class SQLiteTodoRepository implements ITodoRepository {
       updatedAt: new Date(row.updated_at || row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
       artifact: row.artifact || undefined,
-      workspacePath: row.workspace_path || "/",
+      workspaceId: row.workspace_id,  // V3: 从关系表获取
       sortOrder: row.sort_order,
     };
   }
@@ -747,13 +752,7 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
     const createdAt = new Date();
     const updatedAt = createdAt;
 
-    // 获取父任务的 workspace_path
-    const parentStmt = this.db.prepare(`
-      SELECT workspace_path FROM todos WHERE id = ?
-    `);
-    const parentRow = parentStmt.get(input.parentId) as any;
-    const workspacePath = parentRow?.workspace_path || '/';
-
+    // V3: 子任务不直接关联工作区，通过 todo_relations 跟随父任务
     // 获取当前最大 sort_order
     const maxOrderStmt = this.db.prepare(`
       SELECT MAX(t.sort_order) as max_order 
@@ -764,12 +763,12 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
     const maxOrderRow = maxOrderStmt.get(input.parentId) as any;
     const sortOrder = (maxOrderRow?.max_order || 0) + 1;
 
-    // 插入子任务到统一 todos 表
+    // 插入子任务到统一 todos 表（不包含 workspace_path）
     const stmt = this.db.prepare(`
-      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, workspace_path, sort_order)
-      VALUES (?, 'subtask', ?, 'pending', 0, ?, ?, NULL, ?, ?)
+      INSERT INTO todos (id, type, text, status, completed, created_at, updated_at, artifact, sort_order)
+      VALUES (?, 'subtask', ?, 'pending', 0, ?, ?, NULL, ?)
     `);
-    stmt.run(id, input.text, createdAt.toISOString(), updatedAt.toISOString(), workspacePath, sortOrder);
+    stmt.run(id, input.text, createdAt.toISOString(), updatedAt.toISOString(), sortOrder);
 
     // 建立关系
     const relationStmt = this.db.prepare(`
@@ -786,7 +785,7 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
       createdAt,
       updatedAt,
       tagIds: [],
-      workspacePath,
+      // V3: 子任务不直接关联工作区，通过父任务关联
       sortOrder,
     };
   }
@@ -912,7 +911,8 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at || row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
-      workspacePath: row.workspace_path || "/",
+      // V3: 子任务不直接关联工作区，通过 parent 关联
+      workspaceId: undefined,
       sortOrder: row.sort_order,
       artifact: row.artifact || undefined,
     };
@@ -1004,13 +1004,11 @@ class SQLiteWorkspaceRepository implements IWorkspaceRepository {
   }
 
   async getTodoCount(id: string): Promise<number> {
-    const workspace = await this.findById(id);
-    if (!workspace) return 0;
-    
+    // V3: 使用关系表查询
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM todos WHERE workspace_path = ?
+      SELECT COUNT(*) as count FROM todo_workspaces WHERE workspace_id = ?
     `);
-    const row = stmt.get(workspace.path) as any;
+    const row = stmt.get(id) as any;
     return row?.count || 0;
   }
 
@@ -1165,13 +1163,84 @@ export class SQLiteDatabase implements IDatabase {
       CREATE INDEX IF NOT EXISTS idx_todos_type ON todos(type);
       CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
       CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(completed);
-      CREATE INDEX IF NOT EXISTS idx_todos_workspace ON todos(workspace_path);
       CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
       CREATE INDEX IF NOT EXISTS idx_todo_tags_todo_id ON todo_tags(todo_id);
       CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
       CREATE INDEX IF NOT EXISTS idx_todo_relations_parent ON todo_relations(parent_id);
       CREATE INDEX IF NOT EXISTS idx_todo_relations_child ON todo_relations(child_id);
     `);
+
+    // ========== V3: 新增 todo_workspaces 关系表，移除 workspace_path 字段 ==========
+    this.migrateToV3();
+  }
+
+  /**
+   * V3 迁移：新增 todo_workspaces 关系表
+   * - 子任务不直接关联工作区，通过 todo_relations 跟随主任务
+   * - workspace_path 字段被废弃，使用关系表关联
+   */
+  private migrateToV3(): void {
+    if (!this.db) return;
+
+    // 1. 创建任务-工作区关系表（如果不存在）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS todo_workspaces (
+        todo_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        PRIMARY KEY (todo_id, workspace_id),
+        FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+    `);
+
+    // 2. 创建索引
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_todo_workspaces_todo ON todo_workspaces(todo_id);
+      CREATE INDEX IF NOT EXISTS idx_todo_workspaces_workspace ON todo_workspaces(workspace_id);
+    `);
+
+    // 3. 检查是否需要迁移（已有关系数据则跳过）
+    const relationCount = this.db.prepare("SELECT COUNT(*) as count FROM todo_workspaces").get() as any;
+    if (relationCount.count > 0) return;
+
+    // 4. 从 workspace_path 迁移数据到关系表
+    // 获取所有有 workspace_path 的任务（只迁移主任务，子任务通过关系跟随）
+    const todosWithWorkspace = this.db.prepare(`
+      SELECT t.id, t.workspace_path, t.type
+      FROM todos t
+      WHERE t.workspace_path IS NOT NULL
+    `).all() as any[];
+
+    // 准备插入语句
+    const insertRelation = this.db.prepare(`
+      INSERT OR IGNORE INTO todo_workspaces (todo_id, workspace_id)
+      SELECT ?, id FROM workspaces WHERE path = ?
+    `);
+
+    // 准备默认 root 工作区的插入
+    const insertRootRelation = this.db.prepare(`
+      INSERT OR IGNORE INTO todo_workspaces (todo_id, workspace_id)
+      VALUES (?, 'root')
+    `);
+
+    for (const todo of todosWithWorkspace) {
+      const path = todo.workspace_path || '/';
+      
+      // 尝试根据 path 找到 workspace_id 并建立关系
+      const workspace = this.db.prepare("SELECT id FROM workspaces WHERE path = ?").get(path) as any;
+      
+      if (workspace) {
+        insertRelation.run(todo.id, path);
+      } else {
+        // 如果找不到对应工作区，关联到 root
+        insertRootRelation.run(todo.id);
+      }
+    }
+
+    console.log(`[V3 Migration] Migrated ${todosWithWorkspace.length} tasks to todo_workspaces`);
+
+    // 注意：由于 SQLite 不支持直接删除列，workspace_path 字段保留但不再使用
+    // 后续查询都通过 todo_workspaces 关系表进行
   }
 
   /**

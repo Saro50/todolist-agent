@@ -67,12 +67,12 @@ describe("TodoItem", () => {
     expect(onDelete).toHaveBeenCalledWith("todo-1");
   });
 
-  it("applies strikethrough when completed", () => {
+  it("applies gray color when completed", () => {
     const completedTodo = { ...mockTodo, completed: true };
     render(<TodoItem {...defaultProps} todo={completedTodo} />);
 
     const text = screen.getByText("Buy milk");
-    expect(text).toHaveClass("line-through");
+    expect(text).toHaveClass("text-gray-400");
   });
 
   it("calls onTagClick when tag is clicked", async () => {

@@ -52,35 +52,31 @@ export interface PaginatedTodos {
 export const todoApi = {
   /**
    * 获取任务列表
-   * @param workspacePath - 可选的工作目录路径，不传则获取所有任务
+   * @param workspaceId - 可选的工作区 ID，不传则获取所有任务
    */
-  getAll(workspacePath?: string): Promise<Todo[]> {
-    // 只有在明确指定工作区时才添加参数
-    // workspacePath 为 undefined 或 null 时获取所有任务
-    // workspacePath 为 "/" 时获取根目录任务
-    // workspacePath 为其他值时获取指定工作区的任务
-    const params = workspacePath !== undefined 
-      ? `?workspace=${encodeURIComponent(workspacePath)}` 
+  getAll(workspaceId?: string): Promise<Todo[]> {
+    const params = workspaceId !== undefined 
+      ? `?workspace=${encodeURIComponent(workspaceId)}` 
       : "";
     return fetchJson(`${API_BASE}/todos${params}`);
   },
 
   /**
    * 获取分页任务列表（支持筛选）
-   * @param workspacePath - 可选的工作目录路径
+   * @param workspaceId - 可选的工作区 ID
    * @param page - 页码，从 1 开始
    * @param pageSize - 每页数量
    * @param filters - 筛选条件（状态、标签）
    */
   getAllPaginated(
-    workspacePath?: string, 
+    workspaceId?: string, 
     page: number = 1, 
     pageSize: number = 20,
     filters?: TodoFilters
   ): Promise<PaginatedTodos> {
     const params = new URLSearchParams();
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     params.append("page", String(page));
     params.append("pageSize", String(pageSize));
@@ -100,20 +96,20 @@ export const todoApi = {
     return fetchJson(`${API_BASE}/todos/${id}`);
   },
 
-  getByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+  getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
 
-  getByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+  getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
@@ -128,7 +124,7 @@ export const todoApi = {
   /**
    * 创建任务
    */
-  create(data: { text: string; completed?: boolean; tagIds?: string[]; workspacePath?: string }): Promise<Todo> {
+  create(data: { text: string; completed?: boolean; tagIds?: string[]; workspaceId?: string }): Promise<Todo> {
     return fetchJson(`${API_BASE}/todos`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -151,6 +147,16 @@ export const todoApi = {
   clearCompleted(): Promise<{ deletedCount: number }> {
     return fetchJson(`${API_BASE}/todos/clear-completed`, {
       method: "POST",
+    });
+  },
+
+  /**
+   * 批量删除任务
+   */
+  batchDelete(ids: string[]): Promise<{ deletedCount: number }> {
+    return fetchJson(`${API_BASE}/todos/batch-delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
     });
   },
 };
