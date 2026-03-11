@@ -630,7 +630,12 @@ class SQLiteTodoRepository implements ITodoRepository {
 class SQLiteTagRepository implements ITagRepository {
   constructor(private db: Database.Database) {}
 
-  async findAll(): Promise<Tag[]> {
+  async findAll(workspaceId?: string): Promise<Tag[]> {
+    // V4: 如果指定了工作区，只返回该工作区的标签
+    if (workspaceId) {
+      return this.findByWorkspace(workspaceId);
+    }
+    // 否则返回所有标签（向后兼容）
     const stmt = this.db.prepare("SELECT * FROM tags ORDER BY name");
     const rows = stmt.all() as any[];
     return rows.map(this.rowToTag);
@@ -651,13 +656,21 @@ class SQLiteTagRepository implements ITagRepository {
     return rows.map(this.rowToTag);
   }
 
-  async create(tag: Omit<Tag, "id">): Promise<Tag> {
+  async create(tag: Omit<Tag, "id">, workspaceId?: string): Promise<Tag> {
     const id = Date.now().toString();
 
+    // 创建标签
     const stmt = this.db.prepare(`
       INSERT INTO tags (id, name, color) VALUES (?, ?, ?)
     `);
     stmt.run(id, tag.name, tag.color);
+
+    // V4: 关联到工作区（默认为 root）
+    const targetWorkspaceId = workspaceId || 'root';
+    const insertWorkspaceRelation = this.db.prepare(`
+      INSERT INTO workspace_tags (tag_id, workspace_id) VALUES (?, ?)
+    `);
+    insertWorkspaceRelation.run(id, targetWorkspaceId);
 
     return { id, ...tag };
   }
@@ -704,6 +717,34 @@ class SQLiteTagRepository implements ITagRepository {
     `);
     const row = stmt.get(tagId) as any;
     return row?.count || 0;
+  }
+
+  // V4: 按工作区查询标签
+  async findByWorkspace(workspaceId: string): Promise<Tag[]> {
+    const stmt = this.db.prepare(`
+      SELECT t.* FROM tags t
+      JOIN workspace_tags wt ON t.id = wt.tag_id
+      WHERE wt.workspace_id = ?
+      ORDER BY t.name
+    `);
+    const rows = stmt.all(workspaceId) as any[];
+    return rows.map(this.rowToTag);
+  }
+
+  // V4: 将标签关联到工作区
+  async associateWithWorkspace(tagId: string, workspaceId: string): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO workspace_tags (tag_id, workspace_id) VALUES (?, ?)
+    `);
+    stmt.run(tagId, workspaceId);
+  }
+
+  // V4: 从工作区移除标签
+  async removeFromWorkspace(tagId: string, workspaceId: string): Promise<void> {
+    const stmt = this.db.prepare(`
+      DELETE FROM workspace_tags WHERE tag_id = ? AND workspace_id = ?
+    `);
+    stmt.run(tagId, workspaceId);
   }
 
   private rowToTag(row: any): Tag {
@@ -1118,11 +1159,11 @@ export class SQLiteDatabase implements IDatabase {
       );
     `);
 
-    // 创建 tags 表
+    // 创建 tags 表（V4: 移除 name 的唯一约束，改为按工作区隔离）
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tags (
         id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         color TEXT NOT NULL
       );
     `);
@@ -1172,6 +1213,9 @@ export class SQLiteDatabase implements IDatabase {
 
     // ========== V3: 新增 todo_workspaces 关系表，移除 workspace_path 字段 ==========
     this.migrateToV3();
+    
+    // ========== V4: 新增 workspace_tags 关系表，标签关联到工作区 ==========
+    this.migrateToV4();
   }
 
   /**
@@ -1241,6 +1285,110 @@ export class SQLiteDatabase implements IDatabase {
 
     // 注意：由于 SQLite 不支持直接删除列，workspace_path 字段保留但不再使用
     // 后续查询都通过 todo_workspaces 关系表进行
+  }
+
+  /**
+   * V4 迁移：新增 workspace_tags 关系表
+   * - 标签不再全局共享，而是属于特定工作区
+   * - 通过 workspace_tags 关系表关联标签和工作区
+   * - 移除 tags.name 的唯一约束，改为按工作区隔离
+   */
+  private migrateToV4(): void {
+    if (!this.db) return;
+
+    // 0. 检查并移除 tags.name 的唯一约束（SQLite 需要重建表）
+    const tableInfo = this.db.prepare("PRAGMA table_info(tags)").all() as any[];
+    const nameColumn = tableInfo.find(col => col.name === 'name');
+    
+    // 如果 name 列有唯一约束，需要重建表来移除它
+    if (nameColumn && nameColumn.pk === 0) {
+      // 检查索引是否存在
+      const indexes = this.db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tags'").all() as any[];
+      const hasUniqueIndex = indexes.some(idx => 
+        idx.name === 'sqlite_autoindex_tags_1' || idx.name === 'idx_tags_name_unique'
+      );
+      
+      if (hasUniqueIndex || nameColumn.unique) {
+        console.log('[V4 Migration] 移除 tags.name 的唯一约束...');
+        
+        // 创建新表（没有唯一约束）
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS tags_new (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL
+          );
+        `);
+        
+        // 复制数据
+        this.db.exec(`INSERT INTO tags_new SELECT * FROM tags;`);
+        
+        // 删除旧表
+        this.db.exec(`DROP TABLE tags;`);
+        
+        // 重命名新表
+        this.db.exec(`ALTER TABLE tags_new RENAME TO tags;`);
+        
+        console.log('[V4 Migration] 已移除 tags.name 的唯一约束');
+      }
+    }
+
+    // 1. 创建标签-工作区关系表（如果不存在）
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS workspace_tags (
+        tag_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        PRIMARY KEY (tag_id, workspace_id),
+        FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+      );
+    `);
+
+    // 2. 创建索引
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_workspace_tags_tag ON workspace_tags(tag_id);
+      CREATE INDEX IF NOT EXISTS idx_workspace_tags_workspace ON workspace_tags(workspace_id);
+    `);
+
+    // 3. 检查是否需要迁移（已有关系数据则跳过）
+    const relationCount = this.db.prepare("SELECT COUNT(*) as count FROM workspace_tags").get() as any;
+    if (relationCount.count > 0) return;
+
+    // 4. 将现有标签关联到所有使用过该标签的工作区
+    // 获取所有已使用的标签-工作区组合
+    const tagWorkspacePairs = this.db.prepare(`
+      SELECT DISTINCT tt.tag_id, tw.workspace_id
+      FROM todo_tags tt
+      JOIN todo_workspaces tw ON tt.todo_id = tw.todo_id
+    `).all() as any[];
+
+    // 准备插入语句
+    const insertRelation = this.db.prepare(`
+      INSERT OR IGNORE INTO workspace_tags (tag_id, workspace_id) VALUES (?, ?)
+    `);
+
+    for (const pair of tagWorkspacePairs) {
+      insertRelation.run(pair.tag_id, pair.workspace_id);
+    }
+
+    // 5. 对于没有关联工作区的标签，关联到 root 工作区
+    const orphanedTags = this.db.prepare(`
+      SELECT t.id 
+      FROM tags t
+      WHERE NOT EXISTS (
+        SELECT 1 FROM workspace_tags wt WHERE wt.tag_id = t.id
+      )
+    `).all() as any[];
+
+    const insertRootRelation = this.db.prepare(`
+      INSERT INTO workspace_tags (tag_id, workspace_id) VALUES (?, 'root')
+    `);
+
+    for (const tag of orphanedTags) {
+      insertRootRelation.run(tag.id);
+    }
+
+    console.log(`[V4 Migration] Associated ${tagWorkspacePairs.length} tag-workspace pairs, ${orphanedTags.length} tags moved to root`);
   }
 
   /**

@@ -193,7 +193,7 @@ export function useTodos(): UseTodosReturn {
       const targetWorkspace = workspace ?? currentWorkspace;
       const effectiveFilters = filters ?? convertFilters(statusFilter, tagFilter);
       
-      // 并行加载任务和标签
+      // 并行加载任务和标签（V4: 标签按工作区加载）
       const [todosResult, tagsData] = await Promise.all([
         api.todos.getAllPaginated(
           targetWorkspace.id, 
@@ -201,7 +201,7 @@ export function useTodos(): UseTodosReturn {
           DEFAULT_PAGE_SIZE,
           effectiveFilters
         ),
-        api.tags.getAll(),
+        api.tags.getAll(targetWorkspace.id),
       ]);
       
       // 检查是否是最新请求
@@ -479,16 +479,21 @@ export function useTodos(): UseTodosReturn {
   }, [todos, refresh]);
 
   // 创建标签
+  // V4: 创建标签时关联到当前工作区
   const createTag = useCallback(async (name: string, color: Tag["color"]) => {
     try {
-      const newTag = await api.tags.create({ name, color });
+      const newTag = await api.tags.create({ 
+        name, 
+        color,
+        workspaceId: currentWorkspace.id 
+      });
       setTags((prev) => [...prev, newTag]);
       return newTag;
     } catch (err) {
       console.error("Failed to create tag:", err);
       throw err;
     }
-  }, []);
+  }, [currentWorkspace.id]);
 
   // ============ 子任务操作（懒加载） ============
 

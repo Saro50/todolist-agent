@@ -311,8 +311,9 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
 // ==================== Remote Tag Repository ====================
 
 class RemoteTagRepository extends BaseRemoteRepository implements ITagRepository {
-  async findAll(): Promise<Tag[]> {
-    return this.fetch("/api/tags");
+  async findAll(workspaceId?: string): Promise<Tag[]> {
+    const params = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+    return this.fetch(`/api/tags${params}`);
   }
 
   async findById(id: string): Promise<Tag | null> {
@@ -328,10 +329,10 @@ class RemoteTagRepository extends BaseRemoteRepository implements ITagRepository
     return this.fetch(`/api/tags?ids=${ids.join(",")}`);
   }
 
-  async create(tag: Omit<Tag, "id">): Promise<Tag> {
+  async create(tag: Omit<Tag, "id">, workspaceId?: string): Promise<Tag> {
     return this.fetch("/api/tags", {
       method: "POST",
-      body: JSON.stringify(tag),
+      body: JSON.stringify({ ...tag, workspaceId }),
     });
   }
 
@@ -360,6 +361,23 @@ class RemoteTagRepository extends BaseRemoteRepository implements ITagRepository
   async getTodoCount(tagId: string): Promise<number> {
     const result = await this.fetch(`/api/tags/${tagId}/count`);
     return result.count;
+  }
+
+  // V4: 按工作区查询标签
+  async findByWorkspace(workspaceId: string): Promise<Tag[]> {
+    return this.fetch(`/api/tags?workspace=${encodeURIComponent(workspaceId)}`);
+  }
+
+  // V4: 将标签关联到工作区（远程实现暂不完整支持）
+  async associateWithWorkspace(tagId: string, workspaceId: string): Promise<void> {
+    // 远程实现通过 create 时指定 workspaceId 实现
+    console.warn("Remote associateWithWorkspace not fully supported");
+  }
+
+  // V4: 从工作区移除标签（远程实现暂不完整支持）
+  async removeFromWorkspace(tagId: string, workspaceId: string): Promise<void> {
+    // 远程实现暂不完整支持
+    console.warn("Remote removeFromWorkspace not fully supported");
   }
 }
 

@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureConnected } from "../db";
 
-// GET /api/tags - 获取所有标签
+// GET /api/tags - 获取所有标签（支持按工作区筛选）
 export async function GET(request: NextRequest) {
   try {
     const db = await ensureConnected();
     const { searchParams } = new URL(request.url);
     
     const ids = searchParams.get("ids");
+    const workspaceId = searchParams.get("workspace");
     
     let tags;
     if (ids) {
       tags = await db.tags.findByIds(ids.split(","));
+    } else if (workspaceId) {
+      // V4: 按工作区查询标签
+      tags = await db.tags.findByWorkspace(workspaceId);
     } else {
       tags = await db.tags.findAll();
     }
@@ -32,10 +36,13 @@ export async function POST(request: NextRequest) {
     const db = await ensureConnected();
     const data = await request.json();
 
+    // V4: 支持指定工作区创建标签
+    const workspaceId = data.workspaceId;
+
     const tag = await db.tags.create({
       name: data.name,
       color: data.color,
-    });
+    }, workspaceId);
 
     return NextResponse.json(tag, { status: 201 });
   } catch (error) {

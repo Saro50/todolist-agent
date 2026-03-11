@@ -164,15 +164,18 @@ export const todoApi = {
 // ==================== Tag API ====================
 
 export const tagApi = {
-  getAll(): Promise<Tag[]> {
-    return fetchJson(`${API_BASE}/tags`);
+  // V4: 支持按工作区查询标签
+  getAll(workspaceId?: string): Promise<Tag[]> {
+    const params = workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : "";
+    return fetchJson(`${API_BASE}/tags${params}`);
   },
 
   getById(id: string): Promise<Tag> {
     return fetchJson(`${API_BASE}/tags/${id}`);
   },
 
-  create(data: { name: string; color: Tag["color"] }): Promise<Tag> {
+  // V4: 支持指定工作区创建标签
+  create(data: { name: string; color: Tag["color"]; workspaceId?: string }): Promise<Tag> {
     return fetchJson(`${API_BASE}/tags`, {
       method: "POST",
       body: JSON.stringify(data),

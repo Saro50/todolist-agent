@@ -133,17 +133,22 @@ export interface IWorkspaceRepository {
  */
 export interface ITagRepository {
   // 查询
-  findAll(): Promise<Tag[]>;
+  findAll(workspaceId?: string): Promise<Tag[]>;
   findById(id: string): Promise<Tag | null>;
   findByIds(ids: string[]): Promise<Tag[]>;
   
   // 增删改
-  create(tag: Omit<Tag, "id">): Promise<Tag>;
+  create(tag: Omit<Tag, "id">, workspaceId?: string): Promise<Tag>;
   update(id: string, data: Partial<Tag>): Promise<Tag | null>;
   delete(id: string): Promise<boolean>;
   
   // 获取标签关联的任务数量
   getTodoCount(tagId: string): Promise<number>;
+  
+  // V4: 工作区关联
+  findByWorkspace(workspaceId: string): Promise<Tag[]>;
+  associateWithWorkspace(tagId: string, workspaceId: string): Promise<void>;
+  removeFromWorkspace(tagId: string, workspaceId: string): Promise<void>;
 }
 
 /**
