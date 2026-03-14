@@ -57,6 +57,11 @@ interface UseTodosReturn {
   // 状态操作
   updateTodoStatus: (todoId: string, status: ProcessingStatus) => Promise<void>;
   
+  // 审批操作
+  approveTodo: (todoId: string, approvalStatus: 'approved' | 'rejected') => Promise<void>;
+  batchApproveTodos: (ids: string[], approvalStatus: 'approved' | 'rejected') => Promise<void>;
+  
+  
   // 子任务操作（懒加载）
   addSubTask: (todoId: string, text: string) => Promise<void>;
   toggleSubTask: (subTaskId: string, completed: boolean) => Promise<void>;
@@ -461,6 +466,38 @@ export function useTodos(): UseTodosReturn {
     }
   }, []);
 
+  // 审批任务
+  const approveTodo = useCallback(async (id: string, approvalStatus: 'approved' | 'rejected') => {
+    try {
+      const result = await api.todos.approve(id, approvalStatus);
+      setTodos((prev) =>
+        prev.map((t) => (t.id === id ? result.data : t))
+      );
+    } catch (err) {
+      console.error("Failed to approve todo:", err);
+      throw err;
+    }
+  }, []);
+
+  // 批量审批任务
+  const batchApproveTodos = useCallback(async (ids: string[], approvalStatus: 'approved' | 'rejected') => {
+    try {
+      await api.todos.batchApprove(ids, approvalStatus);
+      // 更新本地状态
+      setTodos((prev) =>
+        prev.map((t) => {
+          if (ids.includes(t.id)) {
+            return { ...t, approvalStatus };
+          }
+          return t;
+        })
+      );
+    } catch (err) {
+      console.error("Failed to batch approve todos:", err);
+      throw err;
+    }
+  }, []);
+
   // 清除已完成
   const clearCompleted = useCallback(async () => {
     try {
@@ -642,6 +679,8 @@ export function useTodos(): UseTodosReturn {
     updateTodoTags,
     updateTodoArtifact,
     updateTodoStatus,
+    approveTodo,
+    batchApproveTodos,
     clearCompleted,
     createTag,
     

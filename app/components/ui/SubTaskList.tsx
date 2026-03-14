@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SubTask } from "@/app/types";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "./Checkbox";
@@ -16,6 +16,8 @@ interface SubTaskListProps {
   onUpdateText: (subTaskId: string, text: string) => Promise<void>;
   onUpdateArtifact: (subTaskId: string, artifact: string) => Promise<void>;
   className?: string;
+  /** 是否自动进入添加模式 */
+  autoFocusAdd?: boolean;
 }
 
 /**
@@ -31,12 +33,20 @@ export function SubTaskList({
   onUpdateText,
   onUpdateArtifact,
   className,
+  autoFocusAdd = false,
 }: SubTaskListProps) {
-  const [isAdding, setIsAdding] = useState(false);
+  const [isAdding, setIsAdding] = useState(autoFocusAdd);
   const [newText, setNewText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [expandedArtifacts, setExpandedArtifacts] = useState<Set<string>>(new Set());
+
+  // 响应 autoFocusAdd 变化
+  useEffect(() => {
+    if (autoFocusAdd) {
+      setIsAdding(true);
+    }
+  }, [autoFocusAdd]);
 
   const completedCount = subTasks.filter((st) => st.completed).length;
   const progress = subTasks.length > 0 ? (completedCount / subTasks.length) * 100 : 0;

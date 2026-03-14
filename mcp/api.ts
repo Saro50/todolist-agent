@@ -11,9 +11,11 @@ type ProcessingStatus = "pending" | "in_progress" | "completed";
 
 type Todo = {
   id: string;
+  type: 'task' | 'subtask';
   text: string;
   status: ProcessingStatus;
   completed: boolean;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
   createdAt: Date;
   tagIds: string[];
   subTasks?: SubTask[];
@@ -29,12 +31,13 @@ type Tag = {
 
 type SubTask = {
   id: string;
-  todoId: string;
+  todoId: string;  // 父任务 ID（同 parentId）
   text: string;
   completed: boolean;
   createdAt: Date;
   order: number;
   artifact?: string;
+  parentId?: string;  // 父任务 ID（V3 新增）
 };
 
 type Workspace = {
@@ -135,6 +138,24 @@ export const todoApi = {
   },
 
   /**
+   * 搜索任务（按标题模糊匹配，支持多标签过滤）
+   * @param keyword - 搜索关键词
+   * @param workspaceId - 可选的工作区ID
+   * @param tagIds - 可选的标签ID数组
+   */
+  search(keyword: string, workspaceId?: string, tagIds?: string[]): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("keyword", keyword);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
+    }
+    if (tagIds !== undefined && tagIds.length > 0) {
+      tagIds.forEach(tagId => params.append("tag", tagId));
+    }
+    return fetchJson(`/api/todos?${params.toString()}`);
+  },
+
+  /**
    * 获取所有工作区列表
    */
   getWorkspaces(): Promise<string[]> {
@@ -165,6 +186,30 @@ export const todoApi = {
   delete(id: string): Promise<void> {
     return fetchJson(`/api/todos/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  /**
+   * 审批任务（通过或拒绝）
+   * @param id - 任务ID
+   * @param approvalStatus - 审批状态: 'approved' 或 'rejected'
+   */
+  approve(id: string, approvalStatus: 'approved' | 'rejected'): Promise<{ success: boolean; data: Todo }> {
+    return fetchJson(`/api/todos/${id}/approval`, {
+      method: "PATCH",
+      body: JSON.stringify({ approvalStatus }),
+    });
+  },
+
+  /**
+   * 批量审批任务
+   * @param ids - 任务ID数组
+   * @param approvalStatus - 审批状态: 'approved' 或 'rejected'
+   */
+  batchApprove(ids: string[], approvalStatus: 'approved' | 'rejected'): Promise<{ success: boolean; data: Todo[]; updated: number; failed?: number }> {
+    return fetchJson(`/api/todos/batch-approval`, {
+      method: "POST",
+      body: JSON.stringify({ ids, approvalStatus }),
     });
   },
 };

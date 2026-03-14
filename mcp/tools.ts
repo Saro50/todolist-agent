@@ -29,6 +29,7 @@ export const CreateTodoSchema = z.object({
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
   status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
+  approvalStatus: z.enum(["pending", "approved", "rejected"]).optional().describe("审批状态: pending(待审批), approved(已通过), rejected(已拒绝)，默认pending"),
 });
 
 export const UpdateTodoSchema = z.object({
@@ -39,6 +40,7 @@ export const UpdateTodoSchema = z.object({
   status: z.enum(["pending", "in_progress", "completed"]).optional().describe("任务处理状态: pending(待处理), in_progress(处理中), completed(已完成)"),
   tagIds: z.array(z.string()).optional().describe("关联的标签ID列表"),
   artifact: z.string().optional().describe("产物(Markdown格式)"),
+  approvalStatus: z.enum(["pending", "approved", "rejected"]).optional().describe("审批状态: pending(待审批), approved(已通过), rejected(已拒绝)"),
 });
 
 export const DeleteTodoSchema = z.object({
@@ -51,7 +53,9 @@ export const ToggleTodoSchema = z.object({
 
 // ==================== 工作区工具 ====================
 
-export const GetWorkspacesSchema = z.object({});
+export const GetWorkspacesSchema = z.object({
+  path: z.string().optional().describe("工作区路径匹配，支持路径后缀匹配。例如 'a/b/c' 匹配 path 以 '/c' 结尾的工作区"),
+});
 
 export const CreateWorkspaceSchema = z.object({
   name: z.string().min(1).describe("工作区名称"),
@@ -119,6 +123,19 @@ export const ToggleSubTaskSchema = z.object({
   completed: z.boolean().describe("完成状态"),
 });
 
+// ==================== 审批工具 ====================
+
+export const ApproveTodoSchema = z.object({
+  id: z.string().describe("任务ID"),
+  workspaceId: z.string().describe("工作区ID，用于验证任务归属"),
+  approvalStatus: z.enum(["approved", "rejected"]).describe("审批状态: approved(通过) 或 rejected(拒绝)"),
+});
+
+export const GetPendingApprovalsSchema = z.object({
+  workspaceId: z.string().describe("工作区ID"),
+  type: z.enum(["task", "subtask", "all"]).optional().describe("任务类型筛选: task(主任务), subtask(子任务), all(全部)，默认all"),
+});
+
 // ==================== 产物工具 ====================
 
 export const UpdateTodoArtifactSchema = z.object({
@@ -137,6 +154,7 @@ export const SearchTodosSchema = z.object({
   workspaceId: z.string().describe("工作区ID，用于指定搜索范围"),
   keyword: z.string().min(1).describe("搜索关键词，支持模糊匹配任务标题"),
   status: TodoStatusSchema.optional().describe("筛选状态: all/active/completed"),
+  tagIds: z.array(z.string()).optional().describe("标签ID数组，用于按多个标签筛选结果（任务必须包含所有指定标签）"),
 });
 
 export const GetTodosByTagSchema = z.object({
@@ -183,6 +201,10 @@ export const ToolName = {
   GET_TODOS_BY_TAG: "get_todos_by_tag",
   
   GET_STATS: "get_stats",
+  
+  // 审批工具
+  APPROVE_TODO: "approve_todo",
+  GET_PENDING_APPROVALS: "get_pending_approvals",
 } as const;
 
 export type ToolName = typeof ToolName[keyof typeof ToolName];
@@ -228,7 +250,7 @@ export const toolDefinitions: ToolDefinition[] = [
   // 工作区管理
   {
     name: ToolName.GET_WORKSPACES,
-    description: "获取所有工作区列表",
+    description: "获取工作区列表，支持通过 path 参数进行路径后缀匹配。例如传入 path='a/b/c' 可匹配 path 以 '/c' 结尾的工作区",
     schema: GetWorkspacesSchema,
   },
   {
@@ -325,5 +347,17 @@ export const toolDefinitions: ToolDefinition[] = [
     name: ToolName.GET_STATS,
     description: "获取指定工作区的任务统计信息。workspaceId 为必传参数",
     schema: GetStatsSchema,
+  },
+  
+  // 审批
+  {
+    name: ToolName.APPROVE_TODO,
+    description: "审批任务（通过或拒绝）。用于用户对AI创建的任务方案进行审批确认",
+    schema: ApproveTodoSchema,
+  },
+  {
+    name: ToolName.GET_PENDING_APPROVALS,
+    description: "获取当前工作区下所有待审批的任务，用于用户查看需要审批的任务列表",
+    schema: GetPendingApprovalsSchema,
   },
 ];

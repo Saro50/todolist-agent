@@ -65,6 +65,8 @@ export function TodoList() {
     updateTodoTags,
     updateTodoArtifact,
     updateTodoStatus,
+    approveTodo,
+    batchApproveTodos,
     clearCompleted,
     createTag,
     addSubTask,
@@ -441,6 +443,8 @@ export function TodoList() {
               onUpdateSubTaskArtifact={updateSubTaskArtifact}
               onUpdateArtifact={updateTodoArtifact}
               onAnalyze={handleAnalyze}
+              onApprove={(id) => approveTodo(id, 'approved')}
+              onReject={(id) => approveTodo(id, 'rejected')}
               // 批量选择相关
               isSelectable={isBatchMode}
               isSelected={selectedTodoIds.includes(todo.id)}

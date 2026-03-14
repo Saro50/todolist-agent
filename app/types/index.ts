@@ -43,19 +43,40 @@ export function getTaskStatusConfig(status: TaskStatus) {
 
 export type TodoType = 'task' | 'subtask';
 
+// ==================== 审批状态 ====================
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export const APPROVAL_STATUS_CONFIG: Record<ApprovalStatus, {
+  label: string;
+  color: string;
+  bg: string;
+  icon: string
+}> = {
+  pending: { label: '待审批', color: 'text-amber-600', bg: 'bg-amber-100', icon: '⏳' },
+  approved: { label: '已通过', color: 'text-emerald-600', bg: 'bg-emerald-100', icon: '✅' },
+  rejected: { label: '已拒绝', color: 'text-rose-600', bg: 'bg-rose-100', icon: '❌' },
+};
+
+export function getApprovalStatusConfig(status: ApprovalStatus) {
+  return APPROVAL_STATUS_CONFIG[status];
+}
+
 export interface Todo {
   id: string;
-  type: TodoType;        // 'task' 主任务, 'subtask' 子任务
+  type: TodoType;           // 'task' 主任务, 'subtask' 子任务
   text: string;
-  status: TaskStatus;    // 处理状态：待处理/处理中/已完成
-  completed: boolean;    // 是否已完成（向后兼容，由 status 派生）
-  createdAt: Date;       // 创建时间
-  updatedAt: Date;       // 更新时间
-  tagIds: string[];      // 关联的标签 ID 列表
-  children?: Todo[];     // 子任务列表（可选，加载时填充）
-  artifact?: string;     // 产物：Markdown 报告
-  workspaceId?: string;  // 工作区 ID（V3：只给主任务，子任务跟随父任务）
-  sortOrder?: number;    // 排序序号（子任务用）
+  status: TaskStatus;       // 处理状态：待处理/处理中/已完成
+  completed: boolean;       // 是否已完成（向后兼容，由 status 派生）
+  approvalStatus: ApprovalStatus;  // 审批状态：待审批/已通过/已拒绝
+  createdAt: Date;          // 创建时间
+  updatedAt: Date;          // 更新时间
+  tagIds: string[];         // 关联的标签 ID 列表
+  children?: Todo[];        // 子任务列表（可选，加载时填充）
+  artifact?: string;        // 产物：Markdown 报告
+  workspaceId?: string;     // 工作区 ID（V3：只给主任务，子任务跟随父任务）
+  sortOrder?: number;       // 排序序号（子任务用）
+  parentId?: string;        // 父任务 ID（V3：子任务专用，标识所属主任务）
 }
 
 // 向后兼容：SubTask 作为 Todo 的别名
@@ -89,6 +110,7 @@ export interface Workspace {
 export interface CreateSubTaskInput {
   text: string;
   parentId: string;      // 父任务 ID（原 todoId）
+  approvalStatus?: ApprovalStatus;  // 审批状态，可选，默认 pending
 }
 
 // 子任务更新
@@ -97,6 +119,7 @@ export interface UpdateSubTaskInput {
   completed?: boolean;
   sortOrder?: number;
   artifact?: string;     // 产物更新
+  approvalStatus?: ApprovalStatus;  // 审批状态更新
 }
 
 // 创建任务输入
@@ -108,6 +131,7 @@ export interface CreateTodoInput {
   tagIds?: string[];
   artifact?: string;
   workspaceId?: string;  // V3: 使用 workspaceId 而不是 workspacePath
+  approvalStatus?: ApprovalStatus;  // 审批状态，可选，默认 pending
 }
 
 // 更新任务输入
@@ -119,4 +143,8 @@ export interface UpdateTodoInput {
   artifact?: string;
   sortOrder?: number;
   workspaceId?: string;  // V3: 支持修改工作区
+  approvalStatus?: ApprovalStatus;  // 审批状态更新
 }
+
+// 筛选用的审批状态类型
+export type TodoFilterApprovalStatus = "all" | "pending" | "approved" | "rejected";

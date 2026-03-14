@@ -1,4 +1,4 @@
-# TodoList Agent - AI Agent 任务管理系统
+# TaskBoard - AI Agent 任务管理系统
 
 ## 项目背景
 
@@ -10,7 +10,7 @@
 | 📊 任务追踪困难 | 难以知道当前工作的进展状态 |
 | ❓ 需求理解偏差 | 缺乏统一的需求记录和管理方式 |
 
-**TodoList Agent** 就是为了解决这些问题而生的任务管理系统。
+**TaskBoard** 就是为了解决这些问题而生的任务管理系统。
 
 ## 核心价值
 
@@ -112,7 +112,7 @@ my-app/
 ```json
 {
   "mcpServers": {
-    "todolist": {
+    "TaskBoard {
       "url": "http://localhost:4001/mcp"
     }
   }

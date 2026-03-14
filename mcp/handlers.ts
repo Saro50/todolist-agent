@@ -30,12 +30,13 @@ type Tag = {
 
 type SubTask = {
   id: string;
-  todoId: string;
+  todoId: string;  // 父任务 ID
   text: string;
   completed: boolean;
   createdAt: Date;
   order: number;
   artifact?: string;
+  parentId?: string;  // 父任务 ID（V3 新增）
 };
 
 type Workspace = {
@@ -70,6 +71,8 @@ import {
   SearchTodosSchema,
   GetTodosByTagSchema,
   GetStatsSchema,
+  ApproveTodoSchema,
+  GetPendingApprovalsSchema,
 } from "./tools";
 import { z } from "zod";
 
@@ -339,11 +342,32 @@ export async function handleToggleTodo(args: unknown): Promise<ToolResult> {
 
 // ==================== 工作区处理器 ====================
 
-export async function handleGetWorkspaces(): Promise<ToolResult> {
+export async function handleGetWorkspaces(args: unknown): Promise<ToolResult> {
   try {
-    const workspaces = await api.workspaces.getAll();
+    const params = GetWorkspacesSchema.parse(args || {});
+    let workspaces = await api.workspaces.getAll();
+    
+    // 如果提供了 path 参数，进行路径后缀匹配
+    if (params.path) {
+      // 提取路径的最后一段作为匹配关键词
+      // 例如 "a/b/c" -> "c", "/Users/wn/Work/project" -> "project"
+      const pathParts = params.path.replace(/\\/g, '/').split('/');
+      const lastSegment = pathParts[pathParts.length - 1];
+      
+      if (lastSegment) {
+        // 匹配工作区 path 以 lastSegment 结尾的
+        workspaces = workspaces.filter((ws: Workspace) => {
+          const wsPathParts = ws.path.replace(/\\/g, '/').split('/');
+          const wsLastSegment = wsPathParts[wsPathParts.length - 1];
+          return wsLastSegment === lastSegment;
+        });
+      }
+    }
     
     if (workspaces.length === 0) {
+      if (params.path) {
+        return { content: [{ type: "text", text: `📁 未找到路径匹配 "${params.path}" 的工作区` }] };
+      }
       return { content: [{ type: "text", text: "📁 暂无工作区" }] };
     }
 
@@ -636,11 +660,8 @@ export async function handleSearchTodos(args: unknown): Promise<ToolResult> {
       };
     }
     
-    // 获取任务（按工作区ID筛选）
-    let todos = await api.todos.getAll(workspaceId);
-    
-    // 按关键词模糊匹配标题
-    todos = todos.filter(todo => todo.text.toLowerCase().includes(keyword));
+    // 使用原生搜索 API（支持数据库层模糊匹配和多标签过滤）
+    let todos = await api.todos.search(params.keyword, workspaceId, params.tagIds);
     
     // 按状态筛选
     if (params.status === "active") {
@@ -748,6 +769,111 @@ export async function handleGetTodosByTag(args: unknown): Promise<ToolResult> {
   }
 }
 
+// ==================== 审批处理器 ====================
+
+export async function handleApproveTodo(args: unknown): Promise<ToolResult> {
+  try {
+    const params = ApproveTodoSchema.parse(args || {});
+    const { id, workspaceId, approvalStatus } = params;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 审批失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
+    
+    const todo = await api.todos.update(id, { approvalStatus, workspaceId });
+    
+    if (!todo) {
+      return {
+        content: [{ type: "text", text: "❌ 任务不存在" }],
+        isError: true,
+      };
+    }
+    
+    const statusText = approvalStatus === 'approved' ? '已通过 ✅' : '已拒绝 ❌';
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `✅ 任务审批成功: ${statusText}\n\n${formatTodo(todo)}` 
+      }],
+    };
+  } catch (error) {
+    console.error(`[MCP approve_todo] 错误:`, error);
+    return handleError(error);
+  }
+}
+
+export async function handleGetPendingApprovals(args: unknown): Promise<ToolResult> {
+  try {
+    const params = GetPendingApprovalsSchema.parse(args || {});
+    const { workspaceId, type = 'all' } = params;
+    
+    // 验证工作区是否存在
+    const workspaces = await api.workspaces.getAll();
+    const workspace = workspaces.find((w: any) => w.id === workspaceId);
+    if (!workspace) {
+      const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
+      return {
+        content: [{ 
+          type: "text", 
+          text: `❌ 获取待审批任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        }],
+        isError: true,
+      };
+    }
+    
+    // 获取所有任务
+    let todos = await api.todos.getAll(workspaceId);
+    
+    // 按类型筛选
+    if (type === 'task') {
+      todos = todos.filter(t => t.type === 'task');
+    } else if (type === 'subtask') {
+      todos = todos.filter(t => t.type === 'subtask');
+    }
+    
+    // 筛选待审批的任务
+    const pendingTodos = todos.filter(t => t.approvalStatus === 'pending');
+    
+    if (pendingTodos.length === 0) {
+      return {
+        content: [{ 
+          type: "text", 
+          text: `📭 工作区 "${workspace.name}" 暂无待审批的任务` 
+        }],
+      };
+    }
+    
+    const wsHeader = ` [工作区: ${workspace.name}]`;
+    const lines = [`⏳ 待审批任务列表${wsHeader} (${pendingTodos.length}项)\n`];
+    
+    for (const todo of pendingTodos) {
+      const typeIcon = todo.type === 'subtask' ? '└─ ' : '';
+      lines.push(`${typeIcon}⏳ ${todo.text}`);
+      lines.push(`   ID: ${todo.id} | 状态: ${todo.status} | 创建: ${new Date(todo.createdAt).toLocaleDateString()}`);
+      if (todo.artifact) {
+        lines.push(`   📄 有产物文档`);
+      }
+      lines.push('');
+    }
+    
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } catch (error) {
+    console.error(`[MCP get_pending_approvals] 错误:`, error);
+    return handleError(error);
+  }
+}
+
 // ==================== 统计处理器 ====================
 
 export async function handleGetStats(args: unknown): Promise<ToolResult> {
@@ -838,4 +964,8 @@ export const toolHandlers: Record<ToolName, (args: unknown) => Promise<ToolResul
   [ToolName.GET_TODOS_BY_TAG]: handleGetTodosByTag,
   
   [ToolName.GET_STATS]: handleGetStats,
+  
+  // 审批工具
+  [ToolName.APPROVE_TODO]: handleApproveTodo,
+  [ToolName.GET_PENDING_APPROVALS]: handleGetPendingApprovals,
 };

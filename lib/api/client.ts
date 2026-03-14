@@ -159,6 +159,30 @@ export const todoApi = {
       body: JSON.stringify({ ids }),
     });
   },
+
+  /**
+   * 审批任务（通过或拒绝）
+   * @param id - 任务ID
+   * @param approvalStatus - 审批状态: 'approved' 或 'rejected'
+   */
+  approve(id: string, approvalStatus: 'approved' | 'rejected'): Promise<{ success: boolean; data: Todo }> {
+    return fetchJson(`${API_BASE}/todos/${id}/approval`, {
+      method: "PATCH",
+      body: JSON.stringify({ approvalStatus }),
+    });
+  },
+
+  /**
+   * 批量审批任务
+   * @param ids - 任务ID数组
+   * @param approvalStatus - 审批状态: 'approved' 或 'rejected'
+   */
+  batchApprove(ids: string[], approvalStatus: 'approved' | 'rejected'): Promise<{ success: boolean; data: Todo[]; updated: number; failed?: number }> {
+    return fetchJson(`${API_BASE}/todos/batch-approval`, {
+      method: "POST",
+      body: JSON.stringify({ ids, approvalStatus }),
+    });
+  },
 };
 
 // ==================== Tag API ====================

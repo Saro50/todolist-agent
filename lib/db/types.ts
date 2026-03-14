@@ -80,6 +80,9 @@ export interface ITodoRepository {
   // 查找父任务
   findParents(childId: string): Promise<Todo[]>;
   
+  // 搜索任务（按标题模糊匹配，支持多标签过滤）
+  search(keyword: string, workspaceId?: string, tagIds?: string[]): Promise<Todo[]>;
+  
   // 统计（支持筛选）
   count(workspaceId?: string, filters?: FilterParams & { type?: TodoType }): Promise<number>;
   

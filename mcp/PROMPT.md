@@ -91,6 +91,7 @@ create_subtask({todoId, text})               // 创建子任务
 get_tags()                                   // 获取所有标签
 create_tag({name, color})                    // 创建标签
 get_workspaces()                             // 获取工作区列表
+get_workspaces({path: "a/b/c"})              // 通过路径后缀匹配工作区（匹配 path 以 "/c" 结尾的）
 create_workspace({name, color})              // 创建工作区
 ```
 

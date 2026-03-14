@@ -9,17 +9,18 @@
  */
 
 import Database from "better-sqlite3";
-import { 
-  Todo, 
-  Tag, 
+import {
+  Todo,
+  Tag,
   Workspace,
-  CreateSubTaskInput, 
+  CreateSubTaskInput,
   UpdateSubTaskInput,
   CreateTodoInput,
   UpdateTodoInput,
   TaskStatus,
-  TodoType
-} from "@/app/types";
+          TodoType,
+          ApprovalStatus
+        } from "@/app/types";
 import {
   IDatabase,
   ITodoRepository,
@@ -292,6 +293,56 @@ class SQLiteTodoRepository implements ITodoRepository {
     return rows.map(this.rowToTodo);
   }
 
+  // 搜索任务（按标题模糊匹配，支持多标签过滤）
+  async search(keyword: string, workspaceId?: string, tagIds?: string[]): Promise<Todo[]> {
+    const searchPattern = `%${keyword.toLowerCase()}%`;
+    
+    // 基础查询
+    let baseQuery: string;
+    let baseParams: any[];
+    
+    if (workspaceId) {
+      baseQuery = `
+        SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+        FROM todos t
+        JOIN todo_workspaces tw ON t.id = tw.todo_id
+        LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+        WHERE tw.workspace_id = ? AND LOWER(t.text) LIKE ?
+        GROUP BY t.id
+      `;
+      baseParams = [workspaceId, searchPattern];
+    } else {
+      baseQuery = `
+        SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
+        FROM todos t
+        LEFT JOIN todo_tags tt ON t.id = tt.todo_id
+        WHERE LOWER(t.text) LIKE ?
+        GROUP BY t.id
+      `;
+      baseParams = [searchPattern];
+    }
+    
+    // 如果有标签过滤，使用 INTERSECT 或子查询
+    if (tagIds && tagIds.length > 0) {
+      // 为每个标签创建一个条件，任务必须包含所有指定标签
+      const tagConditions = tagIds.map(() => `tag_ids LIKE ?`).join(' AND ');
+      const tagParams = tagIds.map(id => `%${id}%`);
+      
+      const stmt = this.db.prepare(`
+        SELECT * FROM (${baseQuery})
+        WHERE ${tagConditions}
+        ORDER BY created_at DESC
+      `);
+      const rows = stmt.all(...baseParams, ...tagParams) as any[];
+      return rows.map(this.rowToTodo);
+    } else {
+      // 无标签过滤
+      const stmt = this.db.prepare(`${baseQuery} ORDER BY t.created_at DESC`);
+      const rows = stmt.all(...baseParams) as any[];
+      return rows.map(this.rowToTodo);
+    }
+  }
+
   async addChild(parentId: string, childId: string): Promise<boolean> {
     try {
       const stmt = this.db.prepare(`
@@ -392,6 +443,7 @@ class SQLiteTodoRepository implements ITodoRepository {
       text: input.text,
       status,
       completed,
+      approvalStatus: input.approvalStatus || 'pending',
       createdAt,
       updatedAt,
       tagIds: input.tagIds || [],
@@ -438,6 +490,10 @@ class SQLiteTodoRepository implements ITodoRepository {
     if (data.sortOrder !== undefined) {
       updates.push("sort_order = ?");
       values.push(data.sortOrder);
+    }
+    if (data.approvalStatus !== undefined) {
+      updates.push("approval_status = ?");
+      values.push(data.approvalStatus);
     }
 
     // 始终更新 updated_at
@@ -609,12 +665,14 @@ class SQLiteTodoRepository implements ITodoRepository {
 
   private rowToTodo(row: any): Todo {
     const status: TaskStatus = row.status || (row.completed ? "completed" : "pending");
+    const approvalStatus = (row.approval_status || 'pending') as ApprovalStatus;
     return {
       id: row.id,
       type: row.type || 'task',
       text: row.text,
       status,
       completed: status === "completed",
+      approvalStatus,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at || row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],
@@ -785,7 +843,11 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
       ORDER BY t.sort_order ASC, t.created_at ASC
     `);
     const rows = stmt.all(parentId) as any[];
-    return rows.map(this.rowToSubTask);
+    // 返回包含 parentId 的子任务
+    return rows.map(row => ({
+      ...this.rowToSubTask(row),
+      parentId,  // 添加父任务 ID
+    }));
   }
 
   async create(input: CreateSubTaskInput): Promise<Todo> {
@@ -823,11 +885,13 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
       text: input.text,
       status: 'pending',
       completed: false,
+      approvalStatus: input.approvalStatus || 'pending',
       createdAt,
       updatedAt,
       tagIds: [],
       // V3: 子任务不直接关联工作区，通过父任务关联
       sortOrder,
+      parentId: input.parentId,  // 返回父任务 ID
     };
   }
 
@@ -943,12 +1007,14 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
 
   private rowToSubTask(row: any): Todo {
     const status: TaskStatus = row.status || (row.completed ? "completed" : "pending");
+    const approvalStatus = (row.approval_status || 'pending') as ApprovalStatus;
     return {
       id: row.id,
       type: 'subtask',
       text: row.text,
       status,
       completed: status === "completed",
+      approvalStatus,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at || row.created_at),
       tagIds: row.tag_ids ? row.tag_ids.split(",") : [],

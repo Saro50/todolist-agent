@@ -9,9 +9,11 @@ export async function GET(request: NextRequest) {
     
     // 筛选参数
     const tagId = searchParams.get("tag");
+    const tagIds = searchParams.getAll("tag"); // 支持多个标签
     const completed = searchParams.get("completed");
     const workspaceId = searchParams.get("workspace");
     const status = searchParams.get("status"); // pending/in_progress/completed
+    const keyword = searchParams.get("keyword"); // 搜索关键词
     
     // 分页参数
     const page = parseInt(searchParams.get("page") || "1", 10);
@@ -21,6 +23,12 @@ export async function GET(request: NextRequest) {
     // 限制分页大小
     const validPageSize = Math.min(Math.max(pageSize, 1), 100);
     const validPage = Math.max(page, 1);
+
+    // 搜索接口：如果传了 keyword，使用搜索（支持多标签过滤）
+    if (keyword) {
+      let todos = await db.todos.search(keyword, workspaceId || undefined, tagIds.length > 0 ? tagIds : undefined);
+      return NextResponse.json(todos);
+    }
 
     // 兼容旧 API：如果只传 completed，使用旧方法
     if (completed !== null && !status && !tagId) {

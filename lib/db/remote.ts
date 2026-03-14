@@ -143,6 +143,18 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
+  async search(keyword: string, workspacePath?: string, tagIds?: string[]): Promise<Todo[]> {
+    const params = new URLSearchParams();
+    params.append("keyword", keyword);
+    if (workspacePath !== undefined) {
+      params.append("workspace", workspacePath);
+    }
+    if (tagIds !== undefined && tagIds.length > 0) {
+      tagIds.forEach(tagId => params.append("tag", tagId));
+    }
+    return this.fetch(`/api/todos?${params.toString()}`);
+  }
+
   async findByWorkspace(workspacePath: string, type?: TodoType): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("workspace", workspacePath);

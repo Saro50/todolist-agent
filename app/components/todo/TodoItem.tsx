@@ -4,51 +4,43 @@ import { memo, useState, useCallback } from "react";
 import { Todo, Tag, SubTask, ProcessingStatus } from "@/app/types";
 import { Card } from "@/app/components/ui/Card";
 import { Checkbox } from "@/app/components/ui/Checkbox";
-import { Button } from "@/app/components/ui/Button";
 import { Tag as TagComponent } from "@/app/components/ui/Tag";
 import { InlineTagEditor } from "@/app/components/ui/InlineTagEditor";
 import { SubTaskList } from "@/app/components/ui/SubTaskList";
 import { ArtifactCard } from "@/app/components/ui/ArtifactCard";
+import { ApprovalBadge } from "@/app/components/ui/ApprovalBadge";
+import { ApprovalModal } from "@/app/components/ui/ApprovalModal";
+import { MoreActions } from "@/app/components/ui/MoreActions";
 import { cn } from "@/lib/utils";
 
 interface TodoItemProps {
   todo: Todo;
-  tags: Tag[];  // 所有可用标签
+  tags: Tag[];
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
-  onUpdateTags: (id: string, tagIds: string[]) => void;  // 更新任务标签
-  onCreateTag?: (name: string, color: Tag["color"]) => void;  // 创建新标签
-  onTagClick?: (tagId: string) => void;  // 点击标签筛选
-  
-  // 状态相关
+  onUpdateTags: (id: string, tagIds: string[]) => void;
+  onCreateTag?: (name: string, color: Tag["color"]) => void;
+  onTagClick?: (tagId: string) => void;
   onUpdateStatus: (id: string, status: ProcessingStatus) => Promise<void>;
-  
-  // 子任务相关（懒加载）
   subTasks?: SubTask[];
-  isSubTasksLoaded?: boolean;  // 子任务是否已加载
-  onLoadSubTasks?: (todoId: string) => Promise<void>;  // 加载子任务
+  isSubTasksLoaded?: boolean;
+  onLoadSubTasks?: (todoId: string) => Promise<void>;
   onAddSubTask: (todoId: string, text: string) => Promise<void>;
   onToggleSubTask: (subTaskId: string, completed: boolean) => Promise<void>;
   onDeleteSubTask: (subTaskId: string) => Promise<void>;
   onUpdateSubTask: (subTaskId: string, text: string) => Promise<void>;
   onUpdateSubTaskArtifact: (subTaskId: string, artifact: string) => Promise<void>;
-  
-  // 产物相关
   onUpdateArtifact: (todoId: string, artifact: string) => Promise<void>;
-  
-  // 任务分析
   onAnalyze?: (todo: Todo) => void;
-  
-  // 批量选择相关
+  onApprove?: (id: string) => Promise<void>;
+  onReject?: (id: string) => Promise<void>;
   isSelectable?: boolean;
   isSelected?: boolean;
   onSelect?: () => void;
+  /** 控制是否自动进入添加子任务模式 */
+  autoAddSubTask?: boolean;
 }
 
-/**
- * 单个任务项组件
- * 支持显示和编辑标签、子任务、产物
- */
 export const TodoItem = memo(function TodoItem({
   todo,
   tags,
@@ -68,6 +60,8 @@ export const TodoItem = memo(function TodoItem({
   onUpdateSubTaskArtifact,
   onUpdateArtifact,
   onAnalyze,
+  onApprove,
+  onReject,
   isSelectable = false,
   isSelected = false,
   onSelect,
@@ -76,16 +70,16 @@ export const TodoItem = memo(function TodoItem({
   const [isExpanded, setIsExpanded] = useState(false);
   const [showArtifact, setShowArtifact] = useState(false);
   const [isLoadingSubTasks, setIsLoadingSubTasks] = useState(false);
-  
-  // 获取任务关联的标签对象
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+  const [isReapproving, setIsReapproving] = useState(false);
+  const [isAddingSubTask, setIsAddingSubTask] = useState(false);
+
   const todoTags = tags.filter((tag) => todo.tagIds.includes(tag.id));
   const hasSubTasks = subTasks.length > 0;
-  const completedSubTasks = subTasks.filter((st) => st.completed).length;
   const hasArtifact = !!todo.artifact?.trim();
 
-  // 处理展开/收起子任务
-  const handleToggleExpand = useCallback(async () => {
-    // 如果展开且子任务未加载，先加载子任务
+  // 查看子任务（需要加载）
+  const handleViewSubtasks = useCallback(async () => {
     if (!isExpanded && !isSubTasksLoaded && onLoadSubTasks) {
       setIsLoadingSubTasks(true);
       try {
@@ -97,16 +91,31 @@ export const TodoItem = memo(function TodoItem({
       }
     }
     setIsExpanded(!isExpanded);
+    setIsAddingSubTask(false);  // 关闭添加模式
   }, [isExpanded, isSubTasksLoaded, onLoadSubTasks, todo.id]);
 
-  // 状态配置
-  const statusConfig: Record<ProcessingStatus, { label: string; color: string; bgColor: string }> = {
+  // 添加子任务（展开并进入添加模式）
+  const handleAddSubtask = useCallback(async () => {
+    if (!isSubTasksLoaded && onLoadSubTasks) {
+      setIsLoadingSubTasks(true);
+      try {
+        await onLoadSubTasks(todo.id);
+      } catch (err) {
+        console.error("Failed to load subtasks:", err);
+      } finally {
+        setIsLoadingSubTasks(false);
+      }
+    }
+    setIsExpanded(true);
+    setIsAddingSubTask(true);  // 进入添加模式
+  }, [isSubTasksLoaded, onLoadSubTasks, todo.id]);
+
+  const statusConfig = {
     pending: { label: "待处理", color: "text-amber-600", bgColor: "bg-amber-50" },
     in_progress: { label: "处理中", color: "text-blue-600", bgColor: "bg-blue-50" },
     completed: { label: "已完成", color: "text-green-600", bgColor: "bg-green-50" },
   };
 
-  // 格式化创建时间
   const formatCreatedAt = (date: Date) => {
     const d = new Date(date);
     const now = new Date();
@@ -122,271 +131,216 @@ export const TodoItem = memo(function TodoItem({
     return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
   };
 
+  // 处理审批徽章点击
+  const handleApprovalClick = () => {
+    if (todo.approvalStatus === "pending") {
+      setIsApprovalModalOpen(true);
+    }
+  };
+
+  // 处理重新审批
+  const handleReapprove = () => {
+    setIsReapproving(true);
+    setIsApprovalModalOpen(true);
+  };
+
   return (
-    <Card
-      className={cn(
-        "group flex flex-col gap-3 p-4",
-        "hover:shadow-md transition-all duration-300",
-        todo.completed && "opacity-60"
-      )}
-    >
-      <div className={cn("flex items-center gap-3", isSelected && "bg-blue-50/50 -mx-4 px-4 py-2 rounded-lg")}>
-        {isSelectable ? (
-          <Checkbox
-            checked={isSelected}
-            onChange={() => onSelect?.()}
-          />
-        ) : (
-          <Checkbox
-            checked={todo.completed}
-            onChange={() => onToggle(todo.id)}
-          />
+    <>
+      <Card
+        className={cn(
+          "group flex flex-col gap-2 p-3",
+          "hover:shadow-md transition-all duration-300",
+          todo.completed && "opacity-60"
         )}
-
-        <span
-          className={cn(
-            "flex-1 text-gray-700 transition-all duration-300",
-            todo.completed && "text-gray-400"
+      >
+        {/* 主行 */}
+        <div className={cn("flex items-start gap-2", isSelected && "bg-blue-50/50 -mx-3 px-3 py-2 rounded-lg")}>
+          {isSelectable ? (
+            <Checkbox checked={isSelected} onChange={() => onSelect?.()} />
+          ) : (
+            <Checkbox checked={todo.completed} onChange={() => onToggle(todo.id)} />
           )}
-        >
-          {todo.text}
-        </span>
 
-        {/* 状态选择器 */}
-        <select
-          value={todo.status}
-          onChange={(e) => onUpdateStatus(todo.id, e.target.value as ProcessingStatus)}
-          className={cn(
-            "text-xs px-2 py-1 rounded-full border-0 cursor-pointer",
-            "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-300",
-            "transition-colors duration-200",
-            statusConfig[todo.status].bgColor,
-            statusConfig[todo.status].color
-          )}
-        >
-          <option value="pending">待处理</option>
-          <option value="in_progress">处理中</option>
-          <option value="completed">已完成</option>
-        </select>
-
-        {/* 创建时间 */}
-        <span className="text-xs text-gray-400 whitespace-nowrap">
-          {formatCreatedAt(todo.createdAt)}
-        </span>
-
-        {/* 产物徽章 */}
-        {hasArtifact && (
-          <button
-            onClick={() => setShowArtifact(!showArtifact)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-xs",
-              "transition-colors",
-              showArtifact
-                ? "bg-violet-100 text-violet-600"
-                : "bg-gray-100 text-gray-500 hover:bg-violet-50 hover:text-violet-500"
-            )}
-            title="点击查看产物"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            产物
-          </button>
-        )}
-
-        {/* 子任务计数徽章 */}
-        {hasSubTasks && (
-          <button
-            onClick={handleToggleExpand}
-            disabled={isLoadingSubTasks}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-xs",
-              "transition-colors",
-              isExpanded
-                ? "bg-emerald-100 text-emerald-600"
-                : "bg-gray-100 text-gray-500 hover:bg-gray-200",
-              isLoadingSubTasks && "opacity-50 cursor-wait"
-            )}
-            title="点击查看子任务"
-          >
-            {isLoadingSubTasks ? (
-              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-            ) : (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-            )}
-            {completedSubTasks}/{subTasks.length}
-          </button>
-        )}
-
-        <div className="flex items-center gap-1">
-          {/* 分析按钮 */}
-          {/* {onAnalyze && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onAnalyze(todo)}
-              className="opacity-0 group-hover:opacity-100 text-purple-400 hover:text-purple-600 hover:bg-purple-50"
-              aria-label="AI分析任务"
-              title="AI分析任务"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-            </Button>
-          )} */}
-
-          {/* 产物按钮 */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowArtifact(!showArtifact)}
-            className={cn(
-              "opacity-0 group-hover:opacity-100",
-              showArtifact && "opacity-100 text-violet-500 bg-violet-50",
-              hasArtifact && !showArtifact && "text-violet-400"
-            )}
-            aria-label="产物"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </Button>
-
-          {/* 标签编辑按钮 */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsEditingTags(!isEditingTags)}
-            className={cn(
-              "opacity-0 group-hover:opacity-100",
-              isEditingTags && "opacity-100 text-emerald-500 bg-emerald-50"
-            )}
-            aria-label="编辑标签"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-              />
-            </svg>
-          </Button>
-
-          {/* 展开/收起子任务按钮 */}
-          {!hasSubTasks && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleToggleExpand}
-              disabled={isLoadingSubTasks}
+          {/* 任务内容区域 */}
+          <div className="flex-1 min-w-0">
+            <span
               className={cn(
-                "opacity-0 group-hover:opacity-100",
-                isExpanded && "opacity-100 text-blue-500 bg-blue-50",
-                isLoadingSubTasks && "opacity-50 cursor-wait"
+                "block text-gray-700 transition-all duration-300",
+                todo.completed && "text-gray-400"
               )}
-              aria-label="添加子任务"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                />
-              </svg>
-            </Button>
-          )}
+              {todo.text}
+            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-gray-400 font-mono">ID: {todo.id}</span>
+              <span className="text-xs text-gray-400">·</span>
+              <span className="text-xs text-gray-400">{formatCreatedAt(todo.createdAt)}</span>
+              
+              {/* 子任务展开按钮 */}
+              {subTasks.length > 0 ? (
+                <>
+                  <span className="text-xs text-gray-400">·</span>
+                  <button
+                    onClick={handleViewSubtasks}
+                    className={cn(
+                      "text-xs flex items-center gap-1 transition-colors",
+                      isExpanded 
+                        ? "text-emerald-600" 
+                        : "text-gray-500 hover:text-gray-700"
+                    )}
+                  >
+                    <span>子任务 {subTasks.filter(st => st.completed).length}/{subTasks.length}</span>
+                    <svg 
+                      className={cn(
+                        "w-3.5 h-3.5 transition-transform duration-200",
+                        isExpanded && "rotate-180"
+                      )} 
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                /* 没有子任务时显示展开子任务按钮 */
+                <>
+                  <span className="text-xs text-gray-400">·</span>
+                  <button
+                    onClick={handleViewSubtasks}
+                    className={cn(
+                      "text-xs flex items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors",
+                      isExpanded && "text-emerald-600"
+                    )}
+                  >
+                    <span>展开子任务</span>
+                    <svg 
+                      className={cn(
+                        "w-3.5 h-3.5 transition-transform duration-200",
+                        isExpanded && "rotate-180"
+                      )} 
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
 
-          <Button
-            variant="danger"
-            size="icon"
-            onClick={() => onDelete(todo.id)}
-            className="opacity-0 group-hover:opacity-100"
-            aria-label="删除任务"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* 右侧操作区域 */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* 状态选择器 */}
+            <select
+              value={todo.status}
+              onChange={(e) => onUpdateStatus(todo.id, e.target.value as ProcessingStatus)}
+              className={cn(
+                "text-xs px-2 py-1 rounded-full border-0 cursor-pointer",
+                "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-300",
+                "transition-colors duration-200",
+                statusConfig[todo.status].bgColor,
+                statusConfig[todo.status].color
+              )}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-          </Button>
-        </div>
-      </div>
+              <option value="pending">待处理</option>
+              <option value="in_progress">处理中</option>
+              <option value="completed">已完成</option>
+            </select>
 
-      {/* 标签显示或编辑 */}
-      {isEditingTags ? (
-        <div className="pl-9">
-          <InlineTagEditor
-            availableTags={tags}
-            selectedTagIds={todo.tagIds}
-            onChange={(newTagIds) => onUpdateTags(todo.id, newTagIds)}
-            onCreateTag={onCreateTag}
-            onClose={() => setIsEditingTags(false)}
-          />
-        </div>
-      ) : todoTags.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5 pl-9">
-          {todoTags.map((tag) => (
-            <TagComponent
-              key={tag.id}
-              name={tag.name}
-              color={tag.color}
-              clickable={!!onTagClick}
-              onClick={() => onTagClick?.(tag.id)}
+            {/* 审批状态徽章 */}
+            <ApprovalBadge
+              status={todo.approvalStatus}
+              size="sm"
+              onClick={handleApprovalClick}
+              onReset={isReapproving ? undefined : handleReapprove}
             />
-          ))}
-        </div>
-      ) : null}
 
-      {/* 产物区域 */}
-      {showArtifact && (
-        <div className="pl-9">
-          <ArtifactCard
-            title="任务产物"
-            content={todo.artifact}
-            onSave={(artifact) => onUpdateArtifact(todo.id, artifact)}
-          />
+            {/* 更多操作 */}
+            <MoreActions
+              onEditArtifact={() => setShowArtifact(!showArtifact)}
+              onEditTags={() => setIsEditingTags(!isEditingTags)}
+              onViewSubtasks={hasSubTasks ? handleViewSubtasks : undefined}
+              onAddSubtask={!hasSubTasks ? handleAddSubtask : undefined}
+              onDelete={() => onDelete(todo.id)}
+              hasArtifact={hasArtifact}
+            />
+          </div>
         </div>
-      )}
 
-      {/* 子任务列表 - 仅展开时显示 */}
-      {isExpanded && (
-        <div className="mt-2 pt-3 border-t border-gray-100">
-          <SubTaskList
-            todoId={todo.id}
-            subTasks={subTasks}
-            onAdd={onAddSubTask}
-            onToggle={onToggleSubTask}
-            onDelete={onDeleteSubTask}
-            onUpdateText={onUpdateSubTask}
-            onUpdateArtifact={onUpdateSubTaskArtifact}
-          />
-        </div>
-      )}
-    </Card>
+        {/* 标签显示或编辑 */}
+        {isEditingTags ? (
+          <div className="pl-7">
+            <InlineTagEditor
+              availableTags={tags}
+              selectedTagIds={todo.tagIds}
+              onChange={(newTagIds) => onUpdateTags(todo.id, newTagIds)}
+              onCreateTag={onCreateTag}
+              onClose={() => setIsEditingTags(false)}
+            />
+          </div>
+        ) : todoTags.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pl-7">
+            {todoTags.map((tag) => (
+              <TagComponent
+                key={tag.id}
+                name={tag.name}
+                color={tag.color}
+                clickable={!!onTagClick}
+                onClick={() => onTagClick?.(tag.id)}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        {/* 产物区域 */}
+        {showArtifact && (
+          <div className="pl-7">
+            <ArtifactCard
+              title="任务产物"
+              content={todo.artifact}
+              onSave={(artifact) => onUpdateArtifact(todo.id, artifact)}
+            />
+          </div>
+        )}
+
+        {/* 子任务列表 */}
+        {isExpanded && (
+          <div className="mt-2 pt-3 border-t border-gray-100 pl-7">
+            <SubTaskList
+              todoId={todo.id}
+              subTasks={subTasks}
+              onAdd={onAddSubTask}
+              onToggle={onToggleSubTask}
+              onDelete={onDeleteSubTask}
+              onUpdateText={onUpdateSubTask}
+              onUpdateArtifact={onUpdateSubTaskArtifact}
+              autoFocusAdd={isAddingSubTask}
+            />
+          </div>
+        )}
+      </Card>
+
+      {/* 审批弹窗 */}
+      <ApprovalModal
+        isOpen={isApprovalModalOpen}
+        onClose={() => {
+          setIsApprovalModalOpen(false);
+          setIsReapproving(false);
+        }}
+        currentStatus={todo.approvalStatus}
+        onApprove={() => {
+          onApprove?.(todo.id);
+          setIsReapproving(false);
+        }}
+        onReject={() => {
+          onReject?.(todo.id);
+          setIsReapproving(false);
+        }}
+      />
+    </>
   );
 });
