@@ -66,7 +66,6 @@ export function TodoList() {
     updateTodoArtifact,
     updateTodoStatus,
     approveTodo,
-    batchApproveTodos,
     clearCompleted,
     createTag,
     addSubTask,
@@ -75,6 +74,7 @@ export function TodoList() {
     updateSubTask,
     updateSubTaskArtifact,
     loadSubTasks,
+    approveSubTask,
     switchWorkspace,
     createWorkspace,
     updateWorkspace,
@@ -176,7 +176,7 @@ export function TodoList() {
   const handleBatchDelete = useCallback(async () => {
     if (selectedTodoIds.length === 0) return;
     if (!confirm(`确定要删除选中的 ${selectedTodoIds.length} 个任务吗？`)) return;
-    
+
     try {
       await batchDeleteTodos(selectedTodoIds);
       setSelectedTodoIds([]);
@@ -186,7 +186,7 @@ export function TodoList() {
       alert("批量删除失败");
     }
   }, [selectedTodoIds, batchDeleteTodos]);
-  
+
   // 任务分析相关
   const {
     isAnalyzing,
@@ -200,12 +200,9 @@ export function TodoList() {
 
   // 点击标签快速筛选（切换单个标签）
   const handleTagClick = useCallback((tagId: string) => {
-    setTagFilter(
-      filters.tagIds.includes(tagId)
-        ? [] // 取消筛选
-        : [tagId] // 设置为单个标签筛选
-    );
-  }, [filters.tagIds, setTagFilter]);
+    // 使用 filters.tagIds 获取当前筛选状态
+    setTagFilter(filters.tagIds.includes(tagId) ? [] : [tagId]);
+  }, [setTagFilter, filters.tagIds]);
 
   // 分析任务
   const handleAnalyze = useCallback(async (todo: Todo) => {
@@ -441,6 +438,7 @@ export function TodoList() {
               onDeleteSubTask={deleteSubTask}
               onUpdateSubTask={updateSubTask}
               onUpdateSubTaskArtifact={updateSubTaskArtifact}
+              onApproveSubTask={(id, status) => approveSubTask(id, status)}
               onUpdateArtifact={updateTodoArtifact}
               onAnalyze={handleAnalyze}
               onApprove={(id) => approveTodo(id, 'approved')}

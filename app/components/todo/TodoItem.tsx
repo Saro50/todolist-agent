@@ -30,6 +30,7 @@ interface TodoItemProps {
   onDeleteSubTask: (subTaskId: string) => Promise<void>;
   onUpdateSubTask: (subTaskId: string, text: string) => Promise<void>;
   onUpdateSubTaskArtifact: (subTaskId: string, artifact: string) => Promise<void>;
+  onApproveSubTask?: (subTaskId: string, approvalStatus: 'approved' | 'rejected') => Promise<void>;
   onUpdateArtifact: (todoId: string, artifact: string) => Promise<void>;
   onAnalyze?: (todo: Todo) => void;
   onApprove?: (id: string) => Promise<void>;
@@ -58,6 +59,7 @@ export const TodoItem = memo(function TodoItem({
   onDeleteSubTask,
   onUpdateSubTask,
   onUpdateSubTaskArtifact,
+  onApproveSubTask,
   onUpdateArtifact,
   onAnalyze,
   onApprove,
@@ -229,6 +231,29 @@ export const TodoItem = memo(function TodoItem({
                   </button>
                 </>
               )}
+              
+              {/* 标签展示 - 放在子任务按钮旁边 */}
+              {todoTags.length > 0 && (
+                <>
+                  <span className="text-xs text-gray-400">·</span>
+                  <div className="flex items-center gap-1">
+                    {todoTags.slice(0, 3).map((tag) => (
+                      <TagComponent
+                        key={tag.id}
+                        name={tag.name}
+                        color={tag.color}
+                        clickable={!!onTagClick}
+                        onClick={() => onTagClick?.(tag.id)}
+                      />
+                    ))}
+                    {todoTags.length > 3 && (
+                      <span className="text-xs text-gray-400">
+                        +{todoTags.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -271,8 +296,8 @@ export const TodoItem = memo(function TodoItem({
           </div>
         </div>
 
-        {/* 标签显示或编辑 */}
-        {isEditingTags ? (
+        {/* 标签编辑 */}
+        {isEditingTags && (
           <div className="pl-7">
             <InlineTagEditor
               availableTags={tags}
@@ -282,19 +307,7 @@ export const TodoItem = memo(function TodoItem({
               onClose={() => setIsEditingTags(false)}
             />
           </div>
-        ) : todoTags.length > 0 ? (
-          <div className="flex flex-wrap gap-1 pl-7">
-            {todoTags.map((tag) => (
-              <TagComponent
-                key={tag.id}
-                name={tag.name}
-                color={tag.color}
-                clickable={!!onTagClick}
-                onClick={() => onTagClick?.(tag.id)}
-              />
-            ))}
-          </div>
-        ) : null}
+        )}
 
         {/* 产物区域 */}
         {showArtifact && (
@@ -318,6 +331,7 @@ export const TodoItem = memo(function TodoItem({
               onDelete={onDeleteSubTask}
               onUpdateText={onUpdateSubTask}
               onUpdateArtifact={onUpdateSubTaskArtifact}
+              onApprove={onApproveSubTask}
               autoFocusAdd={isAddingSubTask}
             />
           </div>

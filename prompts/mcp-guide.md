@@ -2,7 +2,7 @@
 
 ## 概述
 
-TodoList MCP (Model Context Protocol) 服务允许 AI 助手通过标准接口管理任务、标签、子任务和产物。
+Kanai MCP (Model Context Protocol) 服务允许 AI 助手通过标准接口管理任务、标签、子任务和产物。
 
 ## 架构设计
 
@@ -88,7 +88,7 @@ npm run dev
 ```json
 {
   "mcpServers": {
-    "todolist": {
+    "kanai": {
       "command": "node",
       "args": ["--loader", "ts-node/esm", "/path/to/my-app/mcp/index.ts"],
       "env": {

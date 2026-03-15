@@ -60,10 +60,10 @@ abstract class BaseRemoteRepository {
 // ==================== Remote Todo Repository ====================
 
 class RemoteTodoRepository extends BaseRemoteRepository implements ITodoRepository {
-  async findAll(workspacePath?: string, type?: TodoType): Promise<Todo[]> {
+  async findAll(workspaceId?: string, type?: TodoType): Promise<Todo[]> {
     const params = new URLSearchParams();
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     if (type !== undefined) {
       params.append("type", type);
@@ -73,13 +73,13 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
   }
 
   async findAllPaginated(
-    workspacePath?: string, 
+    workspaceId?: string,
     pagination?: { page: number; pageSize: number },
     filters?: { status?: string; tagId?: string; type?: TodoType }
   ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
     const params = new URLSearchParams();
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     if (pagination) {
       params.append("page", String(pagination.page));
@@ -97,10 +97,10 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async count(workspacePath?: string, filters?: { status?: string; tagId?: string; type?: TodoType }): Promise<number> {
+  async count(workspaceId?: string, filters?: { status?: string; tagId?: string; type?: TodoType }): Promise<number> {
     const params = new URLSearchParams();
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     if (filters?.status) {
       params.append("status", filters.status);
@@ -125,29 +125,29 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     }
   }
 
-  async findByTag(tagId: string, workspacePath?: string): Promise<Todo[]> {
+  async findByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+  async findByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async search(keyword: string, workspacePath?: string, tagIds?: string[]): Promise<Todo[]> {
+  async search(keyword: string, workspaceId?: string, tagIds?: string[]): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("keyword", keyword);
-    if (workspacePath !== undefined) {
-      params.append("workspace", workspacePath);
+    if (workspaceId !== undefined) {
+      params.append("workspace", workspaceId);
     }
     if (tagIds !== undefined && tagIds.length > 0) {
       tagIds.forEach(tagId => params.append("tag", tagId));
@@ -155,9 +155,9 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return this.fetch(`/api/todos?${params.toString()}`);
   }
 
-  async findByWorkspace(workspacePath: string, type?: TodoType): Promise<Todo[]> {
+  async findByWorkspace(workspaceId: string, type?: TodoType): Promise<Todo[]> {
     const params = new URLSearchParams();
-    params.append("workspace", workspacePath);
+    params.append("workspace", workspaceId);
     if (type !== undefined) {
       params.append("type", type);
     }
@@ -209,9 +209,9 @@ class RemoteTodoRepository extends BaseRemoteRepository implements ITodoReposito
     return result.deletedCount;
   }
 
-  async clearCompleted(workspacePath?: string): Promise<number> {
-    const params = workspacePath && workspacePath !== "/"
-      ? `?workspace=${encodeURIComponent(workspacePath)}`
+  async clearCompleted(workspaceId?: string): Promise<number> {
+    const params = workspaceId && workspaceId !== "root"
+      ? `?workspace=${encodeURIComponent(workspaceId)}`
       : "";
     const result = await this.fetch(`/api/todos/clear-completed${params}`, {
       method: "POST",

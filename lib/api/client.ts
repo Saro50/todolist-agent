@@ -54,11 +54,12 @@ export const todoApi = {
    * 获取任务列表
    * @param workspaceId - 可选的工作区 ID，不传则获取所有任务
    */
-  getAll(workspaceId?: string): Promise<Todo[]> {
-    const params = workspaceId !== undefined 
-      ? `?workspace=${encodeURIComponent(workspaceId)}` 
+  async getAll(workspaceId?: string): Promise<Todo[]> {
+    const params = workspaceId !== undefined
+      ? `?workspace=${encodeURIComponent(workspaceId)}`
       : "";
-    return fetchJson(`${API_BASE}/todos${params}`);
+    const result = await fetchJson<PaginatedTodos>(`${API_BASE}/todos${params}`);
+    return result.data;
   },
 
   /**
@@ -69,8 +70,8 @@ export const todoApi = {
    * @param filters - 筛选条件（状态、标签）
    */
   getAllPaginated(
-    workspaceId?: string, 
-    page: number = 1, 
+    workspaceId?: string,
+    page: number = 1,
     pageSize: number = 20,
     filters?: TodoFilters
   ): Promise<PaginatedTodos> {
@@ -80,7 +81,7 @@ export const todoApi = {
     }
     params.append("page", String(page));
     params.append("pageSize", String(pageSize));
-    
+
     // 添加筛选参数
     if (filters?.status) {
       params.append("status", filters.status);
@@ -88,7 +89,7 @@ export const todoApi = {
     if (filters?.tagId) {
       params.append("tag", filters.tagId);
     }
-    
+
     return fetchJson(`${API_BASE}/todos?${params.toString()}`);
   },
 
@@ -96,22 +97,24 @@ export const todoApi = {
     return fetchJson(`${API_BASE}/todos/${id}`);
   },
 
-  getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
+  async getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
     if (workspaceId !== undefined) {
       params.append("workspace", workspaceId);
     }
-    return fetchJson(`${API_BASE}/todos?${params.toString()}`);
+    const result = await fetchJson<PaginatedTodos>(`${API_BASE}/todos?${params.toString()}`);
+    return result.data;
   },
 
-  getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
+  async getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
     if (workspaceId !== undefined) {
       params.append("workspace", workspaceId);
     }
-    return fetchJson(`${API_BASE}/todos?${params.toString()}`);
+    const result = await fetchJson<PaginatedTodos>(`${API_BASE}/todos?${params.toString()}`);
+    return result.data;
   },
 
   /**
@@ -294,6 +297,30 @@ export const subTaskApi = {
     return fetchJson(`${API_BASE}/todos/${todoId}/subtasks/reorder`, {
       method: "POST",
       body: JSON.stringify({ subTaskIds }),
+    });
+  },
+
+  /**
+   * 审批子任务（通过或拒绝）
+   * @param id - 子任务ID
+   * @param approvalStatus - 审批状态: 'approved' | 'rejected' | 'pending'
+   */
+  approve(id: string, approvalStatus: 'approved' | 'rejected' | 'pending'): Promise<SubTask> {
+    return fetchJson(`${API_BASE}/subtasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ approvalStatus }),
+    });
+  },
+
+  /**
+   * 批量审批子任务
+   * @param ids - 子任务ID数组
+   * @param approvalStatus - 审批状态: 'approved' | 'rejected' | 'pending'
+   */
+  batchApprove(ids: string[], approvalStatus: 'approved' | 'rejected' | 'pending'): Promise<{ success: boolean; data: SubTask[]; updated: number; failed?: number }> {
+    return fetchJson(`${API_BASE}/subtasks/batch-approval`, {
+      method: "POST",
+      body: JSON.stringify({ ids, approvalStatus }),
     });
   },
 };

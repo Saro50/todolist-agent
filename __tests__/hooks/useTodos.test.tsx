@@ -17,6 +17,10 @@ jest.mock("@/lib/api/client", () => ({
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      batchDelete: jest.fn(),
+      updateArtifact: jest.fn(),
+      approve: jest.fn(),
+      batchApprove: jest.fn(),
     },
     tags: {
       getAll: jest.fn(),
@@ -107,15 +111,14 @@ describe("useTodos", () => {
     expect(api.todos.create).toHaveBeenCalledWith({
       text: "New Todo",
       tagIds: ["tag-1"],
-      workspacePath: "/",  // 默认使用当前工作目录
+      workspaceId: "root",
     });
-    
+
     // Note: After adding a todo, it calls refresh() which reloads the list
-    // So we just verify the create was called correctly
     expect(api.todos.create).toHaveBeenCalledWith({
       text: "New Todo",
       tagIds: ["tag-1"],
-      workspacePath: "/",
+      workspaceId: "root",
     });
   });
 
@@ -135,7 +138,7 @@ describe("useTodos", () => {
     });
 
     expect(api.todos.update).toHaveBeenCalledWith("1", { completed: true });
-    
+
     // 等待状态更新
     await waitFor(() => {
       expect(result.current.todos[0].completed).toBe(true);
@@ -157,7 +160,7 @@ describe("useTodos", () => {
     });
 
     expect(api.todos.delete).toHaveBeenCalledWith("1");
-    
+
     // 等待状态更新
     await waitFor(() => {
       expect(result.current.todos.length).toBe(0);
@@ -180,7 +183,7 @@ describe("useTodos", () => {
     });
 
     expect(api.todos.update).toHaveBeenCalledWith("1", { tagIds: ["tag-1", "tag-2"] });
-    
+
     // 等待状态更新
     await waitFor(() => {
       expect(result.current.todos[0].tagIds).toEqual(["tag-1", "tag-2"]);
@@ -202,8 +205,8 @@ describe("useTodos", () => {
       returnedTag = await result.current.createTag("New Tag", "blue");
     });
 
-    expect(api.tags.create).toHaveBeenCalledWith({ name: "New Tag", color: "blue" });
-    
+    expect(api.tags.create).toHaveBeenCalledWith({ name: "New Tag", color: "blue", workspaceId: "root" });
+
     // 等待状态更新
     await waitFor(() => {
       expect(result.current.tags.length).toBe(1);
@@ -230,7 +233,7 @@ describe("useTodos", () => {
     });
 
     expect(api.todos.delete).toHaveBeenCalledWith("2");
-    
+
     // 等待状态更新 - 只检查剩余的任务
     await waitFor(() => {
       const hasCompleted = result.current.todos.some(t => t.completed);
@@ -240,7 +243,7 @@ describe("useTodos", () => {
 
   it("should refetch data", async () => {
     const refetchedTodo = createTodo({ text: "Refetched" });
-    
+
     (api.todos.getAllPaginated as jest.Mock)
       .mockResolvedValueOnce({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 })
       .mockResolvedValueOnce({ data: [refetchedTodo], total: 1, page: 1, pageSize: 20, totalPages: 1 });
@@ -277,23 +280,22 @@ describe("useTodos", () => {
 
     it("should load todos for specific workspace", async () => {
       const workspaceTodos = [createTodo({ text: "Workspace Todo" })];
-      
+
       (api.todos.getAllPaginated as jest.Mock).mockResolvedValue({ data: workspaceTodos, total: 1, page: 1, pageSize: 20, totalPages: 1 });
       (api.tags.getAll as jest.Mock).mockResolvedValue([]);
 
       const { result } = renderHook(() => useTodos());
-
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      // Should call getAllPaginated with current workspace path and empty filters
-      expect(api.todos.getAllPaginated).toHaveBeenCalledWith("/", 1, 20, {});
+      // Should call getAllPaginated with current workspace id and empty filters
+      expect(api.todos.getAllPaginated).toHaveBeenCalledWith("root", 1, 20, {});
     });
 
     it("should switch workspace", async () => {
       const rootTodos = [createTodo({ id: "1", text: "Root Todo" })];
       const projectTodos = [createTodo({ id: "2", text: "Project Todo" })];
       const projectWorkspace = { id: "project", name: "Project", path: "/project", color: "blue", createdAt: new Date() };
-      
+
       (api.todos.getAllPaginated as jest.Mock)
         .mockResolvedValueOnce({ data: rootTodos, total: 1, page: 1, pageSize: 20, totalPages: 1 })
         .mockResolvedValueOnce({ data: projectTodos, total: 1, page: 1, pageSize: 20, totalPages: 1 });
@@ -311,13 +313,13 @@ describe("useTodos", () => {
         expect(result.current.currentWorkspace.id).toBe("project");
       });
 
-      // Should call getAllPaginated with new workspace path and empty filters
-      expect(api.todos.getAllPaginated).toHaveBeenLastCalledWith("/project", 1, 20, {});
+      // Should call getAllPaginated with new workspace id and empty filters
+      expect(api.todos.getAllPaginated).toHaveBeenLastCalledWith("project", 1, 20, {});
     });
 
     it("should add todo to specific workspace", async () => {
-      const newTodo = createTodo({ text: "Project Task", workspacePath: "/my-project" });
-      
+      const newTodo = createTodo({ text: "Project Task", workspaceId: "my-project" });
+
       (api.todos.getAllPaginated as jest.Mock).mockResolvedValue([]);
       (api.tags.getAll as jest.Mock).mockResolvedValue([]);
       (api.todos.create as jest.Mock).mockResolvedValue(newTodo);
@@ -326,13 +328,13 @@ describe("useTodos", () => {
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
       await act(async () => {
-        await result.current.addTodo("Project Task", [], "/my-project");
+        await result.current.addTodo("Project Task", [], "my-project");
       });
 
       expect(api.todos.create).toHaveBeenCalledWith({
         text: "Project Task",
         tagIds: [],
-        workspacePath: "/my-project",
+        workspaceId: "my-project",
       });
     });
   });

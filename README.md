@@ -1,4 +1,4 @@
-# TaskBoard - AI Agent 任务管理系统
+# Kanai - AI Agent 任务管理系统
 
 ## 项目背景
 
@@ -10,7 +10,7 @@
 | 📊 任务追踪困难 | 难以知道当前工作的进展状态 |
 | ❓ 需求理解偏差 | 缺乏统一的需求记录和管理方式 |
 
-**TaskBoard** 就是为了解决这些问题而生的任务管理系统。
+**Kanai** 就是为了解决这些问题而生的任务管理系统。
 
 ## 核心价值
 
@@ -108,11 +108,11 @@ my-app/
 
 ## MCP 工具清单（25+）
 
-## 配置到工具
+## 配置到 Claude Code
 ```json
 {
   "mcpServers": {
-    "TaskBoard {
+    "Kanai": {
       "url": "http://localhost:4001/mcp"
     }
   }
@@ -133,6 +133,15 @@ my-app/
 ### 产物与搜索
 - `update_todo_artifact` / `update_subtask_artifact`
 - `search_todos` / `get_todos_by_tag` / `get_stats`
+
+### 审批功能
+- `approve_todo` / `get_pending_approvals`
+
+## 文档
+
+- [MCP 服务详细文档](docs/mcp.md)
+- [日志系统说明](docs/logging.md)
+- [开发指南](CLAUDE.md)
 
 ## License
 

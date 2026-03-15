@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { Checkbox } from "./Checkbox";
 import { Button } from "./Button";
 import { ArtifactCard } from "./ArtifactCard";
+import { ApprovalBadge } from "./ApprovalBadge";
+import { ApprovalModal } from "./ApprovalModal";
 
 interface SubTaskListProps {
   todoId: string;
@@ -15,6 +17,7 @@ interface SubTaskListProps {
   onDelete: (subTaskId: string) => Promise<void>;
   onUpdateText: (subTaskId: string, text: string) => Promise<void>;
   onUpdateArtifact: (subTaskId: string, artifact: string) => Promise<void>;
+  onApprove?: (subTaskId: string, approvalStatus: 'approved' | 'rejected') => Promise<void>;
   className?: string;
   /** 是否自动进入添加模式 */
   autoFocusAdd?: boolean;
@@ -32,6 +35,7 @@ export function SubTaskList({
   onDelete,
   onUpdateText,
   onUpdateArtifact,
+  onApprove,
   className,
   autoFocusAdd = false,
 }: SubTaskListProps) {
@@ -40,6 +44,8 @@ export function SubTaskList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [expandedArtifacts, setExpandedArtifacts] = useState<Set<string>>(new Set());
+  const [approvalModalSubTask, setApprovalModalSubTask] = useState<SubTask | null>(null);
+  const [isReapproving, setIsReapproving] = useState(false);
 
   // 响应 autoFocusAdd 变化
   useEffect(() => {
@@ -172,6 +178,28 @@ export function SubTaskList({
                 </svg>
               </button>
 
+              {/* 审批状态徽章 */}
+              {onApprove && (
+                <ApprovalBadge
+                  status={subTask.approvalStatus || 'pending'}
+                  size="sm"
+                  onClick={() => {
+                    if (subTask.approvalStatus === 'pending' || isReapproving) {
+                      setApprovalModalSubTask(subTask);
+                      setIsReapproving(false);
+                    }
+                  }}
+                  onReset={
+                    subTask.approvalStatus !== 'pending'
+                      ? () => {
+                          setIsReapproving(true);
+                          setApprovalModalSubTask(subTask);
+                        }
+                      : undefined
+                  }
+                />
+              )}
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -228,6 +256,30 @@ export function SubTaskList({
           添加子任务
         </button>
       )}
+
+      {/* 审批弹窗 */}
+      <ApprovalModal
+        isOpen={!!approvalModalSubTask}
+        onClose={() => {
+          setApprovalModalSubTask(null);
+          setIsReapproving(false);
+        }}
+        currentStatus={approvalModalSubTask?.approvalStatus || 'pending'}
+        onApprove={() => {
+          if (approvalModalSubTask && onApprove) {
+            onApprove(approvalModalSubTask.id, 'approved');
+          }
+          setApprovalModalSubTask(null);
+          setIsReapproving(false);
+        }}
+        onReject={() => {
+          if (approvalModalSubTask && onApprove) {
+            onApprove(approvalModalSubTask.id, 'rejected');
+          }
+          setApprovalModalSubTask(null);
+          setIsReapproving(false);
+        }}
+      />
     </div>
   );
 }

@@ -39,7 +39,7 @@ const PORT = process.env.MCP_PORT || "4001";
 
 // 服务器信息
 const SERVER_INFO = {
-  name: "todolist-mcp-server",
+  name: "kanai-mcp-server",
   version: "1.0.0",
 };
 
@@ -577,12 +577,12 @@ export async function startHTTPServer(): Promise<void> {
       path: req.path,
       message: `端点 ${req.path} 不存在`,
       availableEndpoints,
-      hint: "Kimi CLI 请配置: { \"mcpServers\": { \"todolist\": { \"url\": \"http://localhost:4001/mcp\" } } }"
+      hint: "Kimi CLI 请配置: { \"mcpServers\": { \"kanai\": { \"url\": \"http://localhost:4001/mcp\" } } }"
     });
   });
 
   app.listen(PORT, () => {
-    console.log("🚀 TodoList MCP HTTP Server 已启动");
+    console.log("🚀 Kanai MCP HTTP Server 已启动");
     console.log(`   Port: ${PORT}`);
     console.log(`   MCP:  http://localhost:${PORT}/mcp  (推荐)`);
     console.log(`   RPC:  http://localhost:${PORT}/rpc`);

@@ -94,13 +94,22 @@ export interface TodoFilters {
   tagId?: string;
 }
 
+// API 分页响应类型
+interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 export const todoApi = {
   /**
    * 获取任务列表
    * @param workspaceId - 可选的工作区ID，不传则获取所有任务
    * @param filters - 可选的筛选条件
    */
-  getAll(workspaceId?: string, filters?: TodoFilters): Promise<Todo[]> {
+  async getAll(workspaceId?: string, filters?: TodoFilters): Promise<Todo[]> {
     const params = new URLSearchParams();
     if (workspaceId !== undefined) {
       params.append("workspace", workspaceId);
@@ -112,29 +121,32 @@ export const todoApi = {
       params.append("tag", filters.tagId);
     }
     const query = params.toString();
-    return fetchJson(`/api/todos${query ? `?${query}` : ""}`);
+    const result = await fetchJson<PaginatedResponse<Todo>>(`/api/todos${query ? `?${query}` : ""}`);
+    return result.data;
   },
 
   getById(id: string): Promise<Todo> {
     return fetchJson(`/api/todos/${id}`);
   },
 
-  getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
+  async getByTag(tagId: string, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("tag", tagId);
     if (workspaceId !== undefined) {
       params.append("workspace", workspaceId);
     }
-    return fetchJson(`/api/todos?${params.toString()}`);
+    const result = await fetchJson<PaginatedResponse<Todo>>(`/api/todos?${params.toString()}`);
+    return result.data;
   },
 
-  getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
+  async getByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     const params = new URLSearchParams();
     params.append("completed", String(completed));
     if (workspaceId !== undefined) {
       params.append("workspace", workspaceId);
     }
-    return fetchJson(`/api/todos?${params.toString()}`);
+    const result = await fetchJson<PaginatedResponse<Todo>>(`/api/todos?${params.toString()}`);
+    return result.data;
   },
 
   /**

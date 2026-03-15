@@ -69,6 +69,8 @@ interface UseTodosReturn {
   updateSubTask: (subTaskId: string, text: string) => Promise<void>;
   updateSubTaskArtifact: (subTaskId: string, artifact: string) => Promise<void>;
   loadSubTasks: (todoId: string) => Promise<void>;
+  approveSubTask: (subTaskId: string, approvalStatus: 'approved' | 'rejected' | 'pending') => Promise<void>;
+  batchApproveSubTasks: (ids: string[], approvalStatus: 'approved' | 'rejected') => Promise<void>;
   
   // 工作区操作
   switchWorkspace: (workspace: Workspace) => void;
@@ -153,6 +155,12 @@ export function useTodos(): UseTodosReturn {
   
   // 用于追踪当前加载的请求，避免竞态条件
   const loadingRef = useRef<number>(0);
+  
+  // 使用 ref 存储最新筛选状态，避免 loadData 的闭包问题
+  const filtersRef = useRef({ statusFilter, tagFilter });
+  useEffect(() => {
+    filtersRef.current = { statusFilter, tagFilter };
+  }, [statusFilter, tagFilter]);
 
   // 加载工作区列表，并根据默认设置自动切换
   const loadWorkspaces = useCallback(async () => {
@@ -196,7 +204,8 @@ export function useTodos(): UseTodosReturn {
       setError(null);
       
       const targetWorkspace = workspace ?? currentWorkspace;
-      const effectiveFilters = filters ?? convertFilters(statusFilter, tagFilter);
+      // 使用 ref 获取最新筛选状态，避免闭包问题
+      const effectiveFilters = filters ?? convertFilters(filtersRef.current.statusFilter, filtersRef.current.tagFilter);
       
       // 并行加载任务和标签（V4: 标签按工作区加载）
       const [todosResult, tagsData] = await Promise.all([
@@ -241,7 +250,7 @@ export function useTodos(): UseTodosReturn {
         setIsLoadingMore(false);
       }
     }
-  }, [currentWorkspace, statusFilter, tagFilter]);
+  }, [currentWorkspace]);
 
   // 初始加载：先加载工作区，如果有默认工作区则自动切换
   useEffect(() => {
@@ -263,6 +272,8 @@ export function useTodos(): UseTodosReturn {
     if (!isLoading || todos.length > 0) {
       loadData(undefined, 1, false);
     }
+    // 注意：这里只依赖筛选状态，loadData 使用 ref 获取最新值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, tagFilter]);
 
   // 切换工作区
@@ -625,7 +636,7 @@ export function useTodos(): UseTodosReturn {
   const updateSubTaskArtifact = useCallback(async (subTaskId: string, artifact: string) => {
     try {
       const updated = await api.subTasks.update(subTaskId, { artifact });
-      
+
       setSubTasks((prev) => {
         const next = { ...prev };
         for (const todoId of Object.keys(next)) {
@@ -637,6 +648,50 @@ export function useTodos(): UseTodosReturn {
       });
     } catch (err) {
       console.error("Failed to update subtask artifact:", err);
+      throw err;
+    }
+  }, []);
+
+  // 审批子任务
+  const approveSubTask = useCallback(async (subTaskId: string, approvalStatus: 'approved' | 'rejected' | 'pending') => {
+    try {
+      const updated = await api.subTasks.approve(subTaskId, approvalStatus);
+
+      setSubTasks((prev) => {
+        const next = { ...prev };
+        for (const todoId of Object.keys(next)) {
+          next[todoId] = next[todoId].map((st) =>
+            st.id === subTaskId ? updated : st
+          );
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed to approve subtask:", err);
+      throw err;
+    }
+  }, []);
+
+  // 批量审批子任务
+  const batchApproveSubTasks = useCallback(async (ids: string[], approvalStatus: 'approved' | 'rejected') => {
+    try {
+      await api.subTasks.batchApprove(ids, approvalStatus);
+
+      // 更新本地状态
+      setSubTasks((prev) => {
+        const next = { ...prev };
+        for (const todoId of Object.keys(next)) {
+          next[todoId] = next[todoId].map((st) => {
+            if (ids.includes(st.id)) {
+              return { ...st, approvalStatus };
+            }
+            return st;
+          });
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error("Failed to batch approve subtasks:", err);
       throw err;
     }
   }, []);
@@ -691,6 +746,8 @@ export function useTodos(): UseTodosReturn {
     updateSubTask,
     updateSubTaskArtifact,
     loadSubTasks,
+    approveSubTask,
+    batchApproveSubTasks,
     
     // 工作区操作
     switchWorkspace,

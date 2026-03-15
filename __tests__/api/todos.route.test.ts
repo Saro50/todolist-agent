@@ -49,7 +49,8 @@ describe("Todos API Routes", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data).toEqual([]);
+      expect(data.data).toEqual([]);
+      expect(data.total).toBe(0);
     });
 
     it("should return all todos", async () => {
@@ -70,7 +71,8 @@ describe("Todos API Routes", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data).toHaveLength(2);
+      expect(data.data).toHaveLength(2);
+      expect(data.total).toBe(2);
     });
 
     it("should filter by status", async () => {
@@ -93,9 +95,9 @@ describe("Todos API Routes", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data).toHaveLength(1);
-      expect(data[0].text).toBe("Completed Todo");
-      expect(data[0].status).toBe("completed");
+      expect(data.data).toHaveLength(1);
+      expect(data.data[0].text).toBe("Completed Todo");
+      expect(data.data[0].status).toBe("completed");
     });
 
     it("should filter by workspace", async () => {
@@ -124,8 +126,8 @@ describe("Todos API Routes", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data).toHaveLength(1);
-      expect(data[0].text).toBe("Test Todo");
+      expect(data.data).toHaveLength(1);
+      expect(data.data[0].text).toBe("Test Todo");
     });
 
     it("should support pagination", async () => {

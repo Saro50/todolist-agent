@@ -71,7 +71,7 @@ class SQLiteTodoRepository implements ITodoRepository {
   }
 
   async findAllPaginated(
-    workspaceId?: string, 
+    workspaceId?: string,
     pagination?: { page: number; pageSize: number },
     filters?: { status?: string; tagId?: string; type?: 'task' | 'subtask' }
   ): Promise<{ data: Todo[]; total: number; page: number; pageSize: number; totalPages: number }> {
@@ -88,14 +88,14 @@ class SQLiteTodoRepository implements ITodoRepository {
     const joins: string[] = [];
     const conditions: string[] = [];
     const params: any[] = [];
-    
+
     // V3: 使用关系表查询工作区
     if (workspaceId) {
       joins.push(`JOIN todo_workspaces tw ON t.id = tw.todo_id`);
       conditions.push(`tw.workspace_id = ?`);
       params.push(workspaceId);
     }
-    
+
     if (filters?.status) {
       conditions.push(`t.status = ?`);
       params.push(filters.status);
@@ -107,7 +107,8 @@ class SQLiteTodoRepository implements ITodoRepository {
     }
 
     if (filters?.tagId) {
-      joins.push(`JOIN todo_tags tt_filter ON t.id = tt_filter.todo_id AND tt_filter.tag_id = ?`);
+      // 使用子查询方式筛选标签，避免 JOIN 中参数顺序问题
+      conditions.push(`EXISTS (SELECT 1 FROM todo_tags tt WHERE tt.todo_id = t.id AND tt.tag_id = ?)`);
       params.push(filters.tagId);
     }
 
@@ -126,10 +127,10 @@ class SQLiteTodoRepository implements ITodoRepository {
     
     sql += ` GROUP BY t.id ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
     params.push(pageSize, offset);
-    
+
     const stmt = this.db.prepare(sql);
     const rows = stmt.all(...params) as any[];
-    
+
     return {
       data: rows.map(this.rowToTodo),
       total,
@@ -145,19 +146,20 @@ class SQLiteTodoRepository implements ITodoRepository {
     const joins: string[] = [];
     const conditions: string[] = [];
     const params: any[] = [];
-    
+
     // V3: 使用关系表查询工作区
     if (workspaceId) {
       joins.push(`JOIN todo_workspaces tw ON t.id = tw.todo_id`);
       conditions.push(`tw.workspace_id = ?`);
       params.push(workspaceId);
     }
-    
+
     if (filters?.tagId) {
-      joins.push(`JOIN todo_tags tt ON t.id = tt.todo_id AND tt.tag_id = ?`);
+      // 使用子查询方式筛选标签，避免 JOIN 中参数顺序问题
+      conditions.push(`EXISTS (SELECT 1 FROM todo_tags tt WHERE tt.todo_id = t.id AND tt.tag_id = ?)`);
       params.push(filters.tagId);
     }
-    
+
     if (filters?.status) {
       conditions.push(`t.status = ?`);
       params.push(filters.status);
@@ -167,16 +169,16 @@ class SQLiteTodoRepository implements ITodoRepository {
       conditions.push(`t.type = ?`);
       params.push(filters.type);
     }
-    
-    const whereClause = conditions.length > 0 
-      ? `WHERE ${conditions.join(' AND ')}` 
+
+    const whereClause = conditions.length > 0
+      ? `WHERE ${conditions.join(' AND ')}`
       : '';
-    
-    // 如果有标签或工作区筛选，需要去重计数
-    const distinctModifier = (filters?.tagId || workspaceId) ? 'DISTINCT' : '';
-    
+
+    // 如果有工作区筛选，需要去重计数（标签筛选使用 EXISTS，不需要 DISTINCT）
+    const distinctModifier = workspaceId ? 'DISTINCT' : '';
+
     const sql = `SELECT COUNT(${distinctModifier} t.id) as count ${fromClause} ${joins.join(' ')} ${whereClause}`;
-    
+
     const stmt = this.db.prepare(sql);
     const row = stmt.get(...params) as any;
     return row?.count || 0;
@@ -218,7 +220,7 @@ class SQLiteTodoRepository implements ITodoRepository {
     return rows.map(this.rowToTodo);
   }
 
-  async findByStatus(completed: boolean, workspacePath?: string): Promise<Todo[]> {
+  async findByStatus(completed: boolean, workspaceId?: string): Promise<Todo[]> {
     let sql = `
       SELECT t.*, GROUP_CONCAT(tt.tag_id) as tag_ids
       FROM todos t
@@ -226,14 +228,18 @@ class SQLiteTodoRepository implements ITodoRepository {
       WHERE t.completed = ?
     `;
     const params: any[] = [completed ? 1 : 0];
-    
-    if (workspacePath) {
-      sql += ` AND t.workspace_path = ?`;
-      params.push(workspacePath);
+
+    // V3: 使用关系表查询工作区
+    if (workspaceId) {
+      sql += ` AND EXISTS (
+        SELECT 1 FROM todo_workspaces tw
+        WHERE tw.todo_id = t.id AND tw.workspace_id = ?
+      )`;
+      params.push(workspaceId);
     }
-    
+
     sql += ` GROUP BY t.id ORDER BY t.created_at DESC`;
-    
+
     const stmt = this.db.prepare(sql);
     const rows = stmt.all(...params) as any[];
     return rows.map(this.rowToTodo);
@@ -919,6 +925,10 @@ class SQLiteSubTaskRepository implements ISubTaskRepository {
     if (data.artifact !== undefined) {
       updates.push("artifact = ?");
       values.push(data.artifact);
+    }
+    if (data.approvalStatus !== undefined) {
+      updates.push("approval_status = ?");
+      values.push(data.approvalStatus);
     }
 
     // 始终更新 updated_at

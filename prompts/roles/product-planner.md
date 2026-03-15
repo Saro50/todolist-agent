@@ -75,9 +75,9 @@
 P0/P1/P2/P3
 ```
 
-## TodoList MCP 集成
+## Kanai MCP 集成
 
-完成需求梳理后，使用 TodoList MCP 创建需求任务，**将完整需求细节写入 artifact 字段**：
+完成需求梳理后，使用 Kanai MCP 创建需求任务，**将完整需求细节写入 artifact 字段**：
 ```
 
 **artifact 字段说明：**

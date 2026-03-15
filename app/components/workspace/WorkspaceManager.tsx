@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { createPortal } from "react-dom";
 import { X, Plus, Edit2, Trash2, Folder, Check, Star } from "lucide-react";
 import { Workspace } from "@/app/types";
+import { Modal } from "@/app/components/ui";
 
 interface WorkspaceManagerProps {
   /** 是否显示 */
@@ -134,33 +134,72 @@ export function WorkspaceManager({
 
   if (!isOpen) return null;
 
-  const modalContent = (
-    <div className="fixed inset-0 z-50">
-      {/* 遮罩层 - 全屏覆盖 */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      {/* 内容层 */}
-      <div className="relative z-10 flex items-start justify-center pt-[100px] h-full overflow-auto">
-        <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden mb-8">
-        {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-800">管理工作区</h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* 错误提示 */}
-        {error && (
-          <div className="mx-4 mt-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-md">
-            {error}
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="管理工作区"
+      size="md"
+      position="top"
+      contentClassName="max-h-80 p-4 space-y-2"
+      footer={
+        isCreating ? (
+          <div className="space-y-3">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="工作区名称"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <span className="text-sm text-slate-500 py-1">颜色:</span>
+              {WORKSPACE_COLORS.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={() => setNewColor(c.key)}
+                  className={`w-6 h-6 rounded-full ${c.bg} ${
+                    newColor === c.key ? "ring-2 ring-offset-2 ring-slate-400" : ""
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={handleCancelCreate}
+                className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 rounded-md transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmCreate}
+                disabled={!newName.trim() || isLoading}
+                className="px-3 py-1.5 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-md transition-colors disabled:opacity-50"
+              >
+                创建
+              </button>
+            </div>
           </div>
-        )}
+        ) : (
+          <button
+            onClick={handleStartCreate}
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            新建工作区
+          </button>
+        )
+      }
+    >
+      {/* 错误提示 */}
+      {error && (
+        <div className="mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-md">
+          {error}
+        </div>
+      )}
 
-        {/* 工作区列表 */}
-        <div className="max-h-80 overflow-y-auto p-4 space-y-2">
+      {/* 工作区列表 */}
           {workspaces.map((workspace) => {
             const colorStyle = getColorStyle(workspace.color);
             const isCurrent = workspace.id === currentWorkspaceId;
@@ -288,65 +327,8 @@ export function WorkspaceManager({
               </div>
             );
           })}
-        </div>
-
-        {/* 创建新工作区 */}
-        {isCreating ? (
-          <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 space-y-3">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="工作区名称"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <span className="text-sm text-slate-500 py-1">颜色:</span>
-              {WORKSPACE_COLORS.map((c) => (
-                <button
-                  key={c.key}
-                  onClick={() => setNewColor(c.key)}
-                  className={`w-6 h-6 rounded-full ${c.bg} ${
-                    newColor === c.key ? "ring-2 ring-offset-2 ring-slate-400" : ""
-                  }`}
-                />
-              ))}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={handleCancelCreate}
-                className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-200 rounded-md transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleConfirmCreate}
-                disabled={!newName.trim() || isLoading}
-                className="px-3 py-1.5 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-md transition-colors disabled:opacity-50"
-              >
-                创建
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
-            <button
-              onClick={handleStartCreate}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              新建工作区
-            </button>
-          </div>
-        )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
-
-  // 使用 Portal 渲染到 body，避免父元素的 backdrop-filter 等属性影响 fixed 定位
-  return createPortal(modalContent, document.body);
 }
 
 export default WorkspaceManager;

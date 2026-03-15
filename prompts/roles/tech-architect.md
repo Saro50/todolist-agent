@@ -95,7 +95,7 @@
 | 性能瓶颈 | 高 | 添加缓存层 |
 ```
 
-## TodoList MCP 集成
+## Kanai MCP 集成
 
 ```javascript
 // 创建技术规划任务（通用型，无需关联需求）

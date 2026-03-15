@@ -57,7 +57,7 @@
 - 更新 artifact 记录实现细节
 - 标记子任务完成
 
-## TodoList MCP 集成
+## Kanai MCP 集成
 
 ```javascript
 // 领取任务：获取待处理的实施任务

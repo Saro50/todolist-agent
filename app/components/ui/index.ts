@@ -8,6 +8,8 @@ export { FilterTabs } from "./FilterTabs";
 export { InlineTagEditor } from "./InlineTagEditor";
 export { Input } from "./Input";
 export { MarkdownEditor, MarkdownPreview } from "./MarkdownEditor";
+export { Modal } from "./Modal";
+export type { ModalProps } from "./Modal";
 export { SubTaskList } from "./SubTaskList";
 export { Tag } from "./Tag";
 export { TagSelector } from "./TagSelector";

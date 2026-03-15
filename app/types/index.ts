@@ -130,7 +130,7 @@ export interface CreateTodoInput {
   completed?: boolean;  // 可选，会从 status 派生
   tagIds?: string[];
   artifact?: string;
-  workspaceId?: string;  // V3: 使用 workspaceId 而不是 workspacePath
+  workspaceId?: string;  // 工作区 ID，对应 workspaces 表的 id 字段
   approvalStatus?: ApprovalStatus;  // 审批状态，可选，默认 pending
 }
 

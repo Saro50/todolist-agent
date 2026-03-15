@@ -4,7 +4,7 @@ import { Card } from "./components/ui/Card";
 export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:py-12">
-      <div className="max-w-xl mx-auto">
+      <div className="mx-auto">
         <header className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2 tracking-tight">
             AI待办任务看板

@@ -917,7 +917,7 @@ export async function handleGetStats(args: unknown): Promise<ToolResult> {
 
     const wsName = workspace.name;
     const lines = [
-      `📊 TodoList 统计 [${wsName}]\n`,
+      `📊 Kanai 统计 [${wsName}]\n`,
       `总任务数: ${total}`,
       `已完成: ${completed} (${completionRate}%)`,
       `进行中: ${active}`,

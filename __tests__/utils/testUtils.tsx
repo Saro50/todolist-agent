@@ -14,14 +14,19 @@ import { Todo, Tag, SubTask, TAG_COLORS } from "@/app/types";
 export function createTodo(overrides: Partial<Todo> = {}): Todo {
   return {
     id: `todo-${Date.now()}`,
+    type: 'task',
     text: "Test Todo",
     status: "pending",
     completed: false,
+    approvalStatus: "pending",
     createdAt: new Date(),
+    updatedAt: new Date(),
     tagIds: [],
-    subTasks: [],
+    children: [],
     artifact: undefined,
-    workspacePath: "/",  // 默认工作目录
+    workspaceId: "root",  // V3: 使用 workspaceId
+    sortOrder: undefined,
+    parentId: undefined,
     ...overrides,
   };
 }
@@ -35,15 +40,21 @@ export function createTag(overrides: Partial<Tag> = {}): Tag {
   };
 }
 
-export function createSubTask(overrides: Partial<SubTask> = {}): SubTask {
+export function createSubTask(overrides: Partial<Todo> = {}): Todo {
   return {
     id: `subtask-${Date.now()}`,
-    todoId: `todo-${Date.now()}`,
+    type: 'subtask',
     text: "Test SubTask",
+    status: "pending",
     completed: false,
+    approvalStatus: "pending",
     createdAt: new Date(),
-    order: 0,
+    updatedAt: new Date(),
+    sortOrder: 0,
     artifact: undefined,
+    workspaceId: "root",
+    parentId: overrides.parentId || `todo-${Date.now()}`,
+    tagIds: [],
     ...overrides,
   };
 }

@@ -40,11 +40,14 @@ export function TodoFilter({
   onTagFilterChange,
   availableTags,
 }: TodoFilterProps) {
+  // 点击标签切换筛选（单选模式：点击已选中标签取消筛选，点击未选中标签切换为该标签）
   const toggleTagFilter = (tagId: string) => {
     if (selectedTagIds.includes(tagId)) {
-      onTagFilterChange(selectedTagIds.filter((id) => id !== tagId));
+      // 已选中，取消筛选
+      onTagFilterChange([]);
     } else {
-      onTagFilterChange([...selectedTagIds, tagId]);
+      // 未选中，设置为该标签（单选）
+      onTagFilterChange([tagId]);
     }
   };
 
