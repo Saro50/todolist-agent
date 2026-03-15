@@ -2,25 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { MoreVertical, FileText, Tag, Trash2, CheckSquare, ListTodo } from "lucide-react";
+import { MoreVertical, Tag, Trash2, ListTodo } from "lucide-react";
 
 interface MoreActionsProps {
-  onEditArtifact?: () => void;
   onEditTags?: () => void;
   onViewSubtasks?: () => void;
   onAddSubtask?: () => void;
   onDelete?: () => void;
-  hasArtifact?: boolean;
   className?: string;
 }
 
 export function MoreActions({
-  onEditArtifact,
   onEditTags,
   onViewSubtasks,
   onAddSubtask,
   onDelete,
-  hasArtifact = false,
   className,
 }: MoreActionsProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -52,23 +48,6 @@ export function MoreActions({
 
       {isOpen && (
         <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-20">
-          {onEditArtifact && (
-            <button
-              onClick={() => {
-                onEditArtifact();
-                setIsOpen(false);
-              }}
-              className={cn(
-                "w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors",
-                hasArtifact ? "text-violet-600" : "text-gray-600",
-                "hover:bg-gray-50"
-              )}
-            >
-              <FileText className="w-4 h-4" />
-              {hasArtifact ? "编辑产物" : "添加产物"}
-            </button>
-          )}
-          
           {onEditTags && (
             <button
               onClick={() => {
@@ -81,7 +60,7 @@ export function MoreActions({
               编辑标签
             </button>
           )}
-          
+
           {/* 查看子任务 - 有子任务时显示 */}
           {onViewSubtasks && (
             <button
@@ -95,7 +74,7 @@ export function MoreActions({
               查看子任务
             </button>
           )}
-          
+
           {/* 添加子任务 - 没有子任务时显示 */}
           {onAddSubtask && (
             <button
@@ -109,7 +88,7 @@ export function MoreActions({
               添加子任务
             </button>
           )}
-          
+
           {onDelete && (
             <>
               <div className="h-px bg-gray-100 my-1" />

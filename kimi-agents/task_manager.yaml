@@ -1,0 +1,6 @@
+version: 1
+agent:
+  extend: default  # 继承默认 Agent
+  system_prompt_path: ./roles/tech_design.md
+  exclude_tools:  # 排除某些工具
+    - "kimi_cli.tools.multiagent:Task"  # 排除 Task 工具，避免嵌套

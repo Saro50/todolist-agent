@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "KanAI": {
+      "type": "http",
+      "url": "http://localhost:4001/mcp",
+      "headers": {
+        "Authorization": "Bearer 12312"
+      }
+    }
+  }
+}

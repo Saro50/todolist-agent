@@ -5,7 +5,7 @@
 import React from "react";
 import { render, screen, waitFor } from "../../utils/testUtils";
 import { TodoItem } from "@/app/components/todo/TodoItem";
-import { createTodo, createTag } from "../../utils/testUtils";
+import { createTodo, createTag, createSubTask } from "../../utils/testUtils";
 
 describe("TodoItem", () => {
   const mockTodo = createTodo({
@@ -20,15 +20,29 @@ describe("TodoItem", () => {
     createTag({ id: "tag-2", name: "Urgent", color: "rose" }),
   ];
 
+  const mockSubTasks = [
+    createSubTask({ id: "subtask-1", parentId: "todo-1", text: "SubTask 1" }),
+  ];
+
+  // 更新后的默认 props，包含所有必需属性
   const defaultProps = {
     todo: mockTodo,
     tags: mockTags,
-    onToggle: jest.fn(),
+    subTasks: mockSubTasks,
+    isSubTasksLoaded: true,
     onDelete: jest.fn(),
     onUpdateTags: jest.fn(),
     onCreateTag: jest.fn(),
     onTagClick: jest.fn(),
-    onUpdateStatus: jest.fn(),
+    onUpdateStatus: jest.fn().mockResolvedValue(undefined),
+    onLoadSubTasks: jest.fn().mockResolvedValue(undefined),
+    onAddSubTask: jest.fn().mockResolvedValue(undefined),
+    onToggleSubTask: jest.fn().mockResolvedValue(undefined),
+    onDeleteSubTask: jest.fn().mockResolvedValue(undefined),
+    onUpdateSubTask: jest.fn().mockResolvedValue(undefined),
+    onUpdateSubTaskArtifact: jest.fn().mockResolvedValue(undefined),
+    onApproveSubTask: jest.fn().mockResolvedValue(undefined),
+    onUpdateArtifact: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {
@@ -46,22 +60,16 @@ describe("TodoItem", () => {
     expect(screen.getByText("Urgent")).toBeInTheDocument();
   });
 
-  it("calls onToggle when checkbox is clicked", async () => {
-    const onToggle = jest.fn();
-    const { user } = render(<TodoItem {...defaultProps} onToggle={onToggle} />);
-
-    const checkbox = screen.getByRole("checkbox");
-    await user.click(checkbox);
-
-    expect(onToggle).toHaveBeenCalledWith("todo-1");
-  });
-
   it("calls onDelete when delete button is clicked", async () => {
     const onDelete = jest.fn();
     const { user } = render(<TodoItem {...defaultProps} onDelete={onDelete} />);
 
-    // 悬停显示删除按钮
-    const deleteButton = screen.getByLabelText("删除任务");
+    // 先点击 "更多操作" 按钮打开菜单
+    const moreButton = screen.getByTitle("更多操作");
+    await user.click(moreButton);
+
+    // 然后点击 "删除任务"
+    const deleteButton = screen.getByText("删除任务");
     await user.click(deleteButton);
 
     expect(onDelete).toHaveBeenCalledWith("todo-1");
@@ -87,10 +95,15 @@ describe("TodoItem", () => {
   it("opens tag editor when tag button is clicked", async () => {
     const { user } = render(<TodoItem {...defaultProps} />);
 
-    const tagButton = screen.getByLabelText("编辑标签");
+    // 先点击 "更多操作" 按钮打开菜单
+    const moreButton = screen.getByTitle("更多操作");
+    await user.click(moreButton);
+
+    // 然后点击 "编辑标签"
+    const tagButton = screen.getByText("编辑标签");
     await user.click(tagButton);
 
-    // 检查编辑器是否打开 - 使用更灵活的匹配
+    // 检查编辑器是否打开
     await waitFor(() => {
       expect(screen.getByText(/新建标签|可选标签/)).toBeInTheDocument();
     });
@@ -109,5 +122,21 @@ describe("TodoItem", () => {
 
     expect(screen.getByText("Shopping")).toBeInTheDocument();
     expect(screen.queryByText("unknown-tag")).not.toBeInTheDocument();
+  });
+
+  it("displays subtask count", () => {
+    render(<TodoItem {...defaultProps} />);
+    // 子任务数量显示
+    expect(screen.getByText(/子任务/)).toBeInTheDocument();
+  });
+
+  it("calls onUpdateStatus when status is changed", async () => {
+    const onUpdateStatus = jest.fn().mockResolvedValue(undefined);
+    const { user } = render(<TodoItem {...defaultProps} onUpdateStatus={onUpdateStatus} />);
+
+    const statusSelect = screen.getByRole("combobox");
+    await user.selectOptions(statusSelect, "completed");
+
+    expect(onUpdateStatus).toHaveBeenCalledWith("todo-1", "completed");
   });
 });

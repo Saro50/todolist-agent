@@ -13,7 +13,7 @@ import { WorkspaceManager } from "@/app/components/workspace";
 import { useTodos } from "@/lib/hooks/useTodos";
 import { useTaskAnalyzer, TaskAnalysisResult } from "@/lib/hooks/useTaskAnalyzer";
 import { TaskAnalysisModal } from "./TaskAnalysisModal";
-import { Folder, ChevronLeft, ChevronRight, Monitor, Plus, X, Trash2, CheckSquare, Square } from "lucide-react";
+import { Folder, ChevronLeft, ChevronRight, Monitor, Plus, X, Trash2, CheckSquare, Square, CheckCircle, XCircle } from "lucide-react";
 
 // 监控面板展开状态存储键
 const MONITOR_EXPANDED_KEY = "todolist-monitor-expanded";
@@ -60,12 +60,12 @@ export function TodoList() {
     
     // 操作函数
     addTodo,
-    toggleTodo,
     deleteTodo,
     updateTodoTags,
     updateTodoArtifact,
     updateTodoStatus,
     approveTodo,
+    batchApproveTodos,
     clearCompleted,
     createTag,
     addSubTask,
@@ -75,6 +75,7 @@ export function TodoList() {
     updateSubTaskArtifact,
     loadSubTasks,
     approveSubTask,
+    batchApproveSubTasks,
     switchWorkspace,
     createWorkspace,
     updateWorkspace,
@@ -103,6 +104,7 @@ export function TodoList() {
   
   // 批量选择状态
   const [selectedTodoIds, setSelectedTodoIds] = useState<string[]>([]);
+  const [selectedSubTaskIds, setSelectedSubTaskIds] = useState<string[]>([]);
   const [isBatchMode, setIsBatchMode] = useState(false);
   
   const [isMonitorExpanded, setIsMonitorExpanded] = useState(() => {
@@ -152,24 +154,47 @@ export function TodoList() {
   }, []);
 
   // 批量选择相关函数
-  const toggleTodoSelection = useCallback((todoId: string) => {
-    setSelectedTodoIds(prev => 
-      prev.includes(todoId)
-        ? prev.filter(id => id !== todoId)
-        : [...prev, todoId]
+  // 选中/取消选中主任务，同时选中/取消选中其所有子任务
+  const toggleTodoSelection = useCallback((todoId: string, subTaskIds: string[]) => {
+    setSelectedTodoIds(prev => {
+      const isSelected = prev.includes(todoId);
+      if (isSelected) {
+        // 取消选中主任务及其子任务
+        setSelectedSubTaskIds(prevSub => prevSub.filter(id => !subTaskIds.includes(id)));
+        return prev.filter(id => id !== todoId);
+      } else {
+        // 选中主任务及其子任务
+        setSelectedSubTaskIds(prevSub => [...new Set([...prevSub, ...subTaskIds])]);
+        return [...prev, todoId];
+      }
+    });
+  }, []);
+
+  // 选中/取消选中子任务
+  const toggleSubTaskSelection = useCallback((subTaskId: string) => {
+    setSelectedSubTaskIds(prev =>
+      prev.includes(subTaskId)
+        ? prev.filter(id => id !== subTaskId)
+        : [...prev, subTaskId]
     );
   }, []);
 
   const selectAllTodos = useCallback(() => {
     if (selectedTodoIds.length === todos.length) {
+      // 取消全选
       setSelectedTodoIds([]);
+      setSelectedSubTaskIds([]);
     } else {
+      // 全选所有主任务和子任务
       setSelectedTodoIds(todos.map(t => t.id));
+      const allSubTaskIds = todos.flatMap(t => (subTasks[t.id] || []).map(s => s.id));
+      setSelectedSubTaskIds(allSubTaskIds);
     }
-  }, [todos, selectedTodoIds.length]);
+  }, [todos, selectedTodoIds.length, subTasks]);
 
   const clearSelection = useCallback(() => {
     setSelectedTodoIds([]);
+    setSelectedSubTaskIds([]);
     setIsBatchMode(false);
   }, []);
 
@@ -180,12 +205,36 @@ export function TodoList() {
     try {
       await batchDeleteTodos(selectedTodoIds);
       setSelectedTodoIds([]);
+      setSelectedSubTaskIds([]);
       setIsBatchMode(false);
     } catch (err) {
       console.error("Failed to batch delete:", err);
       alert("批量删除失败");
     }
   }, [selectedTodoIds, batchDeleteTodos]);
+
+  // 批量审批
+  const handleBatchApprove = useCallback(async (approvalStatus: 'approved' | 'rejected') => {
+    const totalSelected = selectedTodoIds.length + selectedSubTaskIds.length;
+    if (totalSelected === 0) return;
+
+    try {
+      // 批量审批主任务
+      if (selectedTodoIds.length > 0) {
+        await batchApproveTodos(selectedTodoIds, approvalStatus);
+      }
+      // 批量审批子任务
+      if (selectedSubTaskIds.length > 0) {
+        await batchApproveSubTasks(selectedSubTaskIds, approvalStatus);
+      }
+      setSelectedTodoIds([]);
+      setSelectedSubTaskIds([]);
+      setIsBatchMode(false);
+    } catch (err) {
+      console.error("Failed to batch approve:", err);
+      alert("批量审批失败");
+    }
+  }, [selectedTodoIds, selectedSubTaskIds, batchApproveTodos, batchApproveSubTasks]);
 
   // 任务分析相关
   const {
@@ -381,25 +430,41 @@ export function TodoList() {
                     </>
                   )}
                 </button>
-                {selectedTodoIds.length > 0 && (
+                {(selectedTodoIds.length > 0 || selectedSubTaskIds.length > 0) && (
                   <span className="text-sm text-slate-500">
-                    已选 {selectedTodoIds.length} 项
+                    已选 {selectedTodoIds.length} 任务{selectedSubTaskIds.length > 0 && ` + ${selectedSubTaskIds.length} 子任务`}
                   </span>
                 )}
               </>
             )}
           </div>
-          
+
           {isBatchMode && (
             <div className="flex items-center gap-2">
-              {selectedTodoIds.length > 0 && (
-                <button
-                  onClick={handleBatchDelete}
-                  className="text-sm text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  删除
-                </button>
+              {(selectedTodoIds.length > 0 || selectedSubTaskIds.length > 0) && (
+                <>
+                  <button
+                    onClick={() => handleBatchApprove('approved')}
+                    className="text-sm text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    通过
+                  </button>
+                  <button
+                    onClick={() => handleBatchApprove('rejected')}
+                    className="text-sm text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    拒绝
+                  </button>
+                  <button
+                    onClick={handleBatchDelete}
+                    className="text-sm text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    删除
+                  </button>
+                </>
               )}
               <button
                 onClick={clearSelection}
@@ -427,7 +492,6 @@ export function TodoList() {
               subTasks={subTasks[todo.id] || []}
               isSubTasksLoaded={loadedSubTaskIds.has(todo.id)}
               onLoadSubTasks={loadSubTasks}
-              onToggle={toggleTodo}
               onDelete={deleteTodo}
               onUpdateTags={updateTodoTags}
               onCreateTag={createTag}
@@ -446,7 +510,11 @@ export function TodoList() {
               // 批量选择相关
               isSelectable={isBatchMode}
               isSelected={selectedTodoIds.includes(todo.id)}
-              onSelect={() => toggleTodoSelection(todo.id)}
+              onSelect={(todoId, subTaskIds) => toggleTodoSelection(todoId, subTaskIds)}
+              selectedSubTaskIds={selectedSubTaskIds.filter(id =>
+                (subTasks[todo.id] || []).some(s => s.id === id)
+              )}
+              onSubTaskSelect={toggleSubTaskSelection}
             />
           ))
         )}

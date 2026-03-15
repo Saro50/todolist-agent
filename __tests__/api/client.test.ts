@@ -19,7 +19,14 @@ describe("API Client", () => {
     describe("getAll", () => {
       it("should fetch all todos", async () => {
         const mockTodos = [createTodo({ text: "Todo 1" }), createTodo({ text: "Todo 2" })];
-        mockFetchResponse(mockTodos);
+        // API 现在返回分页结构
+        mockFetchResponse({
+          data: mockTodos,
+          total: 2,
+          page: 1,
+          pageSize: 20,
+          totalPages: 1,
+        });
 
         const result = await api.todos.getAll();
 

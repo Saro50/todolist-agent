@@ -11,6 +11,7 @@ interface ArtifactCardProps {
   onSave: (content: string) => Promise<void>;
   className?: string;
   compact?: boolean;  // 紧凑模式（用于子任务）
+  fullHeight?: boolean;  // 全高模式（用于弹窗）
 }
 
 /**
@@ -23,6 +24,7 @@ export function ArtifactCard({
   onSave,
   className,
   compact = false,
+  fullHeight = false,
 }: ArtifactCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(content || "");
@@ -130,7 +132,10 @@ export function ArtifactCard({
       {/* 内容区 */}
       <div className={cn("px-3", compact ? "py-2" : "py-3")}>
         {hasContent ? (
-          <MarkdownPreview content={content} maxHeight={compact ? "120px" : "200px"} />
+          <MarkdownPreview
+            content={content}
+            maxHeight={fullHeight ? "none" : compact ? "120px" : "200px"}
+          />
         ) : (
           <button
             onClick={() => setIsEditing(true)}

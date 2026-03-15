@@ -9,6 +9,7 @@ const config: Config = {
         "<rootDir>/__tests__/api/todos.route.test.ts",
         "<rootDir>/__tests__/api/tags.route.test.ts",
         "<rootDir>/__tests__/api/workspaces.route.test.ts",
+        "<rootDir>/__tests__/api/subtasks.route.test.ts",
       ],
       testEnvironment: "node",
       moduleNameMapper: {

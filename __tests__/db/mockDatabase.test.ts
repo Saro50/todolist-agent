@@ -652,6 +652,7 @@ describe("MockDatabase", () => {
           workspaceId: "root",
           type: 'subtask',
           parentId: parent.id,
+          status: 'completed',  // 设置为已完成
         });
         await db.todos.create({
           text: "Active",

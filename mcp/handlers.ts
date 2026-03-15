@@ -540,27 +540,41 @@ export async function handleGetSubTasks(args: unknown): Promise<ToolResult> {
   }
 }
 
+const MAX_SUBTASKS = 10;
+
 export async function handleCreateSubTask(args: unknown): Promise<ToolResult> {
   try {
     const params = CreateSubTaskSchema.parse(args || {});
     const { workspaceId, todoId, text } = params;
-    
+
     // 验证工作区是否存在
     const workspaces = await api.workspaces.getAll();
     const workspace = workspaces.find((w: any) => w.id === workspaceId);
     if (!workspace) {
       const availableWorkspaces = workspaces.map((w: any) => `${w.name}(ID: ${w.id})`).join("\n") || "无";
       return {
-        content: [{ 
-          type: "text", 
-          text: `❌ 创建子任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}` 
+        content: [{
+          type: "text",
+          text: `❌ 创建子任务失败: 工作区ID "${workspaceId}" 不存在\n\n可用工作区:\n${availableWorkspaces}`
         }],
         isError: true,
       };
     }
-    
+
+    // 检查子任务数量限制
+    const existingSubTasks = await api.subTasks.getByTodoId(todoId);
+    if (existingSubTasks.length >= MAX_SUBTASKS) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ 创建子任务失败: 子任务数量已达上限（${MAX_SUBTASKS}条）\n\n建议:\n1. 拆分任务规模，将复杂任务分解为多个独立的主任务\n2. 重新规划任务结构，确保每个主任务的子任务不超过${MAX_SUBTASKS}条`
+        }],
+        isError: true,
+      };
+    }
+
     const subTask = await api.subTasks.create(todoId, text);
-    
+
     return {
       content: [{ type: "text", text: `✅ 子任务创建成功\n${formatSubTask(subTask)}` }],
     };

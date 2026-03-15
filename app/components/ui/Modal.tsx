@@ -16,7 +16,7 @@ export interface ModalProps {
   /** 底部操作区 */
   footer?: React.ReactNode;
   /** 弹窗大小 */
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl" | "full";
   /** 是否点击遮罩关闭 */
   maskClosable?: boolean;
   /** 是否显示关闭按钮 */
@@ -35,6 +35,8 @@ const sizeClasses = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
+  xl: "max-w-4xl",
+  full: "max-w-6xl h-[90vh] flex flex-col",
 };
 
 /**
@@ -60,7 +62,7 @@ export function Modal({
   if (!isOpen) return null;
 
   const content = (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-[10000]">
       {/* 遮罩层 */}
       <div
         className={cn(
@@ -105,7 +107,7 @@ export function Modal({
           )}
 
           {/* 内容区 */}
-          <div className={cn("overflow-y-auto", contentClassName)}>
+          <div className={cn("overflow-y-auto flex-1 min-h-0", contentClassName)}>
             {children}
           </div>
 

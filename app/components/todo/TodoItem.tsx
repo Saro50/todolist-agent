@@ -8,6 +8,7 @@ import { Tag as TagComponent } from "@/app/components/ui/Tag";
 import { InlineTagEditor } from "@/app/components/ui/InlineTagEditor";
 import { SubTaskList } from "@/app/components/ui/SubTaskList";
 import { ArtifactCard } from "@/app/components/ui/ArtifactCard";
+import { Modal } from "@/app/components/ui/Modal";
 import { ApprovalBadge } from "@/app/components/ui/ApprovalBadge";
 import { ApprovalModal } from "@/app/components/ui/ApprovalModal";
 import { MoreActions } from "@/app/components/ui/MoreActions";
@@ -16,7 +17,6 @@ import { cn } from "@/lib/utils";
 interface TodoItemProps {
   todo: Todo;
   tags: Tag[];
-  onToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onUpdateTags: (id: string, tagIds: string[]) => void;
   onCreateTag?: (name: string, color: Tag["color"]) => void;
@@ -35,9 +35,12 @@ interface TodoItemProps {
   onAnalyze?: (todo: Todo) => void;
   onApprove?: (id: string) => Promise<void>;
   onReject?: (id: string) => Promise<void>;
+  // 批量选择相关
   isSelectable?: boolean;
   isSelected?: boolean;
-  onSelect?: () => void;
+  onSelect?: (todoId: string, subTaskIds: string[]) => void;
+  selectedSubTaskIds?: string[];
+  onSubTaskSelect?: (subTaskId: string) => void;
   /** 控制是否自动进入添加子任务模式 */
   autoAddSubTask?: boolean;
 }
@@ -45,7 +48,6 @@ interface TodoItemProps {
 export const TodoItem = memo(function TodoItem({
   todo,
   tags,
-  onToggle,
   onDelete,
   onUpdateTags,
   onCreateTag,
@@ -64,9 +66,12 @@ export const TodoItem = memo(function TodoItem({
   onAnalyze,
   onApprove,
   onReject,
+  // 批量选择相关
   isSelectable = false,
   isSelected = false,
   onSelect,
+  selectedSubTaskIds = [],
+  onSubTaskSelect,
 }: TodoItemProps) {
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -98,6 +103,14 @@ export const TodoItem = memo(function TodoItem({
 
   // 添加子任务（展开并进入添加模式）
   const handleAddSubtask = useCallback(async () => {
+    const MAX_SUBTASKS = 10;
+
+    // 检查子任务数量限制（仅当已加载子任务时检查）
+    if (isSubTasksLoaded && subTasks.length >= MAX_SUBTASKS) {
+      alert(`子任务数量已达上限（${MAX_SUBTASKS}条），建议拆分任务规模或创建新的主任务来管理。`);
+      return;
+    }
+
     if (!isSubTasksLoaded && onLoadSubTasks) {
       setIsLoadingSubTasks(true);
       try {
@@ -110,7 +123,7 @@ export const TodoItem = memo(function TodoItem({
     }
     setIsExpanded(true);
     setIsAddingSubTask(true);  // 进入添加模式
-  }, [isSubTasksLoaded, onLoadSubTasks, todo.id]);
+  }, [isSubTasksLoaded, onLoadSubTasks, todo.id, subTasks.length]);
 
   const statusConfig = {
     pending: { label: "待处理", color: "text-amber-600", bgColor: "bg-amber-50" },
@@ -157,12 +170,13 @@ export const TodoItem = memo(function TodoItem({
       >
         {/* 主行 */}
         <div className={cn("flex items-start gap-2", isSelected && "bg-blue-50/50 -mx-3 px-3 py-2 rounded-lg")}>
-          {isSelectable ? (
-            <Checkbox checked={isSelected} onChange={() => onSelect?.()} />
-          ) : (
-            <Checkbox checked={todo.completed} onChange={() => onToggle(todo.id)} />
+          {/* 批量选择 checkbox */}
+          {isSelectable && (
+            <Checkbox
+              checked={isSelected}
+              onChange={() => onSelect?.(todo.id, subTasks.map(s => s.id))}
+            />
           )}
-
           {/* 任务内容区域 */}
           <div className="flex-1 min-w-0">
             <span
@@ -276,6 +290,20 @@ export const TodoItem = memo(function TodoItem({
               <option value="completed">已完成</option>
             </select>
 
+            {/* 编辑产物按钮 */}
+            <button
+              onClick={() => setShowArtifact(!showArtifact)}
+              className={cn(
+                "p-1.5 rounded-lg transition-all",
+                showArtifact ? "bg-violet-100 text-violet-600" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+              )}
+              title={hasArtifact ? "编辑产物" : "添加产物"}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </button>
+
             {/* 审批状态徽章 */}
             <ApprovalBadge
               status={todo.approvalStatus}
@@ -286,12 +314,10 @@ export const TodoItem = memo(function TodoItem({
 
             {/* 更多操作 */}
             <MoreActions
-              onEditArtifact={() => setShowArtifact(!showArtifact)}
               onEditTags={() => setIsEditingTags(!isEditingTags)}
               onViewSubtasks={hasSubTasks ? handleViewSubtasks : undefined}
               onAddSubtask={!hasSubTasks ? handleAddSubtask : undefined}
               onDelete={() => onDelete(todo.id)}
-              hasArtifact={hasArtifact}
             />
           </div>
         </div>
@@ -309,16 +335,42 @@ export const TodoItem = memo(function TodoItem({
           </div>
         )}
 
-        {/* 产物区域 */}
-        {showArtifact && (
-          <div className="pl-7">
-            <ArtifactCard
-              title="任务产物"
-              content={todo.artifact}
-              onSave={(artifact) => onUpdateArtifact(todo.id, artifact)}
-            />
-          </div>
-        )}
+        {/* 产物弹窗 */}
+        <Modal
+          isOpen={showArtifact}
+          onClose={() => setShowArtifact(false)}
+          title="任务产物"
+          size="full"
+          contentClassName="p-6"
+          footer={
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowArtifact(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  // 保存逻辑在 ArtifactCard 内部处理
+                }}
+                className="px-4 py-2 text-sm bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          }
+        >
+          <ArtifactCard
+            title=""
+            content={todo.artifact}
+            fullHeight
+            onSave={(artifact) => {
+              onUpdateArtifact(todo.id, artifact);
+              setShowArtifact(false);
+            }}
+          />
+        </Modal>
 
         {/* 子任务列表 */}
         {isExpanded && (
@@ -333,6 +385,9 @@ export const TodoItem = memo(function TodoItem({
               onUpdateArtifact={onUpdateSubTaskArtifact}
               onApprove={onApproveSubTask}
               autoFocusAdd={isAddingSubTask}
+              isSelectable={isSelectable}
+              selectedIds={selectedSubTaskIds}
+              onSelect={onSubTaskSelect}
             />
           </div>
         )}

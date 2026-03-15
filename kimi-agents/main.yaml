@@ -1,0 +1,11 @@
+version: 1
+agent:
+  extend: default  # 继承默认 Agent
+  system_prompt_path: ./kanban_musume.md  # 覆盖系统提示词
+  subagents:
+    coder:
+      path: coder-sub.yaml
+      description: "处理编码实施等任务"
+    task_manager:
+      path: task_manager.yaml
+      description: "技术设计和实施任务管理"

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureConnected } from "../../../db";
 
+const MAX_SUBTASKS = 10;
+
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
@@ -28,6 +30,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { id } = await params;
     const db = await ensureConnected();
     const data = await request.json();
+
+    // 检查子任务数量限制
+    const existingSubTasks = await db.subTasks.findByTodoId(id);
+    if (existingSubTasks.length >= MAX_SUBTASKS) {
+      return NextResponse.json(
+        { error: `子任务数量已达上限（${MAX_SUBTASKS}条），建议拆分任务规模或创建新的主任务来管理` },
+        { status: 400 }
+      );
+    }
 
     const subTask = await db.subTasks.create({
       parentId: id,

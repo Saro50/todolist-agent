@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { SubTask } from "@/app/types";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "./Checkbox";
@@ -21,6 +21,12 @@ interface SubTaskListProps {
   className?: string;
   /** 是否自动进入添加模式 */
   autoFocusAdd?: boolean;
+  /** 是否处于批量选择模式 */
+  isSelectable?: boolean;
+  /** 已选中的子任务 ID 列表 */
+  selectedIds?: string[];
+  /** 选择子任务的回调 */
+  onSelect?: (subTaskId: string) => void;
 }
 
 /**
@@ -38,6 +44,9 @@ export function SubTaskList({
   onApprove,
   className,
   autoFocusAdd = false,
+  isSelectable = false,
+  selectedIds = [],
+  onSelect,
 }: SubTaskListProps) {
   const [isAdding, setIsAdding] = useState(autoFocusAdd);
   const [newText, setNewText] = useState("");
@@ -47,18 +56,19 @@ export function SubTaskList({
   const [approvalModalSubTask, setApprovalModalSubTask] = useState<SubTask | null>(null);
   const [isReapproving, setIsReapproving] = useState(false);
 
-  // 响应 autoFocusAdd 变化
-  useEffect(() => {
-    if (autoFocusAdd) {
-      setIsAdding(true);
-    }
-  }, [autoFocusAdd]);
-
   const completedCount = subTasks.filter((st) => st.completed).length;
   const progress = subTasks.length > 0 ? (completedCount / subTasks.length) * 100 : 0;
+  const MAX_SUBTASKS = 10;
 
   const handleAdd = async () => {
     if (!newText.trim()) return;
+
+    // 检查子任务数量限制
+    if (subTasks.length >= MAX_SUBTASKS) {
+      alert(`子任务数量已达上限（${MAX_SUBTASKS}条），建议拆分任务规模或创建新的主任务来管理。`);
+      return;
+    }
+
     await onAdd(todoId, newText.trim());
     setNewText("");
     setIsAdding(false);
@@ -124,18 +134,26 @@ export function SubTaskList({
             key={subTask.id}
             className={cn(
               "group rounded-lg border transition-all",
-              subTask.completed
-                ? "bg-gray-50/50 border-gray-100"
-                : "bg-white border-gray-200 hover:border-gray-300"
+              selectedIds.includes(subTask.id) && "bg-blue-50/50 border-blue-200",
+              subTask.completed && !selectedIds.includes(subTask.id) && "bg-gray-50/50 border-gray-100",
+              !subTask.completed && !selectedIds.includes(subTask.id) && "bg-white border-gray-200 hover:border-gray-300"
             )}
           >
             {/* 子任务头部 */}
             <div className="flex items-center gap-2 p-2">
-              <Checkbox
-                checked={subTask.completed}
-                onChange={() => onToggle(subTask.id, !subTask.completed)}
-                className="flex-shrink-0"
-              />
+              {isSelectable ? (
+                <Checkbox
+                  checked={selectedIds.includes(subTask.id)}
+                  onChange={() => onSelect?.(subTask.id)}
+                  className="flex-shrink-0"
+                />
+              ) : (
+                <Checkbox
+                  checked={subTask.completed}
+                  onChange={() => onToggle(subTask.id, !subTask.completed)}
+                  className="flex-shrink-0"
+                />
+              )}
 
               {editingId === subTask.id ? (
                 <input

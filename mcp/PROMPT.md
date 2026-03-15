@@ -1,117 +1,200 @@
-# Kanai MCP 服务提示词
+# TaskBoard MCP 服务
 
-## 服务概述
+## 核心规则
 
-Kanai MCP 服务是任务管理系统的核心组件，用于管理用户在当前工作目录下产生的所有任务。该服务记录项目的完整历史、背景信息和实施路径，是 Agent 理解项目上下文、保持工作连续性的重要依据。
+1. **每次交互必须先查询背景**：`get_workspaces` → `search_todos` → `get_pending_approvals`
+2. **Agent 不能审批任务**，只能将完成后的任务状态改为 `pending` 等待用户验收
+3. **只有用户能审批**：通过 Web 界面或 `approve_todo` 工具
+4. **任务结束标志**：`status: completed` + `approvalStatus: approved`（可被复用参考）
 
-**每次与用户交互时，必须先查询该服务获取相关背景信息。**
+---
 
-## 核心职责
+## 任务状态流程
 
-1. **任务记录**：记录所有用户请求和 Agent 的执行过程
-2. **背景获取**：从任务中了解项目背景、历史决策和相关上下文
-3. **工作规划**：将用户需求拆解为可执行的任务结构
-4. **状态追踪**：跟踪任务处理状态，保持工作连续性
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  创建任务                                                         │
+│  status: pending, approvalStatus: pending                        │
+│       ↓                                                          │
+│  用户审批通过                                                      │
+│  approvalStatus: approved                                        │
+│       ↓                                                          │
+│  Agent 开始处理                                                   │
+│  status: in_progress                                             │
+│       ↓                                                          │
+│  Agent 处理完成，提交验收                                          │
+│  status: completed, approvalStatus: pending  ← Agent 只能改到这里  │
+│       ↓                                                          │
+│  用户验收通过                                                      │
+│  approvalStatus: approved                                        │
+│       ↓                                                          │
+│  ✅ 任务结束（可复用参考）                                          │
+│  status: completed, approvalStatus: approved                     │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 状态组合含义
+
+| status | approvalStatus | 含义 | Agent 行为 |
+|--------|---------------|------|-----------|
+| pending | pending | 待审批 | 等待用户审批 |
+| pending | approved | 已审批，待处理 | 可开始执行 |
+| in_progress | approved | 处理中 | 继续执行 |
+| completed | pending | 已完成，待验收 | 等待用户验收 |
+| completed | approved | ✅ 任务结束 | 可作为参考复用 |
+| * | rejected | 已拒绝 | 重新讨论方案 |
+
+---
 
 ## 标签体系
 
-所有任务必须打上以下标签之一：
+标签用于任务的**维度切分**，目的是：
+- 快速检索相关任务
+- 准确归档任务上下文
+- **确保任务参考范围的准确性**
 
-| 标签 | 颜色 | 用途 | 要求 |
+### 标签类型
+
+| 标签 | 颜色 | 用途 | 审批 |
 |------|------|------|------|
-| 需求 | blue | 项目/功能的背景描述，记录业务目标 | 必须创建子任务细化需求点 |
-| 技术规划 | violet | 架构设计、技术选型、实施步骤规划 | 必须创建可测试的子任务 |
-| 实施 | cyan | 按照技术规划的具体实现记录 | 关联对应的技术规划 |
-| 流水账 | slate | 日常常规操作，不具备长期回溯价值 | 不需要创建子任务 |
-| 分支名 | amber | 标记任务出现的 Git 分支（可选） | 格式：`分支:feature/login` |
+| 需求 | blue | 功能/项目背景描述 | ✅ 需要 |
+| 技术规划 | violet | 架构设计、技术选型 | ✅ 需要 |
+| 实施 | cyan | 具体代码实现 | ✅ 需要 |
+| 流水账 | slate | 日常常规操作 | ❌ 无需 |
+
+### 分支标签（必须添加）
+
+**每个任务必须关联其出现的 Git 分支**，确保任务上下文可追溯：
+
+```
+格式：分支:feature/login
+颜色：amber
+```
+
+### 创建任务时的标签规则
+
+```javascript
+create_todo({
+  workspaceId,
+  text: "[类型] 任务标题",
+  tagIds: [
+    "需求/技术规划/实施/流水账",  // 类型标签
+    "分支:feature/xxx"            // 分支标签（必须）
+  ]
+})
+```
+
+### 创建新标签时
+
+```javascript
+// 发现新分支时，创建对应分支标签
+create_tag({
+  name: "分支:feature/new-feature",
+  color: "amber"
+})
+```
+
+---
 
 ## 工作流程
 
-### 阶段一：背景获取（每次交互开始）
-1. 调用 `get_workspaces` 获取当前工作区列表
-2. 调用 `get_todos` 或 `search_todos` 查询相关任务
-3. 调用 `get_tags` 了解已有标签体系
-4. 分析任务背景，确定是否已有相关需求/规划
-
-### 阶段二：需求分析（发现新需求时）
-1. 创建需求任务（标记：需求），标题格式：`[需求] 功能概述`
-2. 为需求创建子任务，将大需求拆分为可验证的功能点
-3. 如已有相关需求，评估是否需要补充或调整
-
-### 阶段三：技术规划（需求明确后）
-1. 创建技术规划任务（标记：技术规划），标题格式：`[技术规划] XXX 技术方案`
-2. 为技术规划创建可测试的子任务
-
-### 阶段四：任务实施（开始编码）
-1. 创建实施任务（标记：实施），标题格式：`[实施] 具体实现内容`
-2. 实施过程中更新状态，记录实现细节
-3. 完成后标记为 completed
-
-### 阶段五：流水账记录（常规操作）
-1. 创建流水账任务（标记：流水账）
-2. 完成后直接标记为 completed
-
-## 处理状态
-
-| 状态 | 值 | 含义 |
-|------|-----|------|
-| ⏳ 待处理 | `pending` | 任务已创建，尚未开始 |
-| 🔄 处理中 | `in_progress` | 正在处理该任务 |
-| ✅ 已完成 | `completed` | 任务已完成 |
-
-## 任务创建规范
-
-### 标题格式
-```
-[类型] 任务概述
+### 1. 每次交互开始
+```javascript
+get_workspaces()                    // 确定工作区
+search_todos({ keyword })           // 搜索相关背景
+get_pending_approvals({ workspaceId }) // 检查待审批
 ```
 
-### 描述格式
+### 2. 创建任务
+```javascript
+create_todo({
+  workspaceId,
+  text: "[类型] 任务标题",
+  tagIds: ["标签ID"],
+  approvalStatus: "pending"  // 默认等待审批
+})
 ```
-背景：为什么需要这个任务
-内容：具体要做什么，预期结果
-关联：关联的需求ID/技术规划ID
+
+### 3. 开始执行（审批通过后）
+```javascript
+update_todo({ id, workspaceId, status: "in_progress" })
 ```
+
+### 4. 完成提交验收
+```javascript
+update_todo({
+  id,
+  workspaceId,
+  status: "completed",
+  approvalStatus: "pending"  // 重置为 pending 等待验收
+})
+```
+
+---
 
 ## MCP 工具速查
 
+### 查询（每次交互必须）
 ```javascript
-// 查询
-get_todos({workspaceId, status, tagId})        // 获取任务列表
-search_todos({workspaceId, keyword, status})   // 模糊搜索
-get_todos_by_tag({workspaceId, tagId, status}) // 按标签查询
-
-// 任务管理
-create_todo({workspaceId, text, tagIds, status, artifact})  // 创建任务
-update_todo({id, workspaceId, text, status, completed, tagIds, artifact}) // 更新任务
-toggle_todo({id})                            // 切换完成状态
-create_subtask({todoId, text})               // 创建子任务
-
-// 标签与工作区
-get_tags()                                   // 获取所有标签
-create_tag({name, color})                    // 创建标签
-get_workspaces()                             // 获取工作区列表
-get_workspaces({path: "a/b/c"})              // 通过路径后缀匹配工作区（匹配 path 以 "/c" 结尾的）
-create_workspace({name, color})              // 创建工作区
+get_workspaces({ path })                    // 获取/匹配工作区
+search_todos({ workspaceId, keyword })      // 模糊搜索
+get_todos({ workspaceId, status, tagId })   // 获取任务列表
+get_pending_approvals({ workspaceId })      // 待审批列表
+get_subtasks({ workspaceId, todoId })       // 获取子任务
+get_tags()                                  // 获取标签
 ```
+
+### 任务管理
+```javascript
+create_todo({ workspaceId, text, tagIds, artifact, approvalStatus })
+update_todo({ id, workspaceId, text, status, approvalStatus, artifact })
+delete_todo({ id })
+toggle_todo({ id })
+
+// 子任务（最多10条）
+create_subtask({ workspaceId, todoId, text })
+update_subtask({ id, text, completed, artifact })
+delete_subtask({ id })
+toggle_subtask({ id, completed })
+
+// 产物
+update_todo_artifact({ todoId, artifact })
+update_subtask_artifact({ subTaskId, artifact })
+```
+
+### 用户操作（Agent 不可调用）
+```javascript
+approve_todo({ id, workspaceId, approvalStatus: "approved" | "rejected" })
+```
+
+---
 
 ## 检查清单
 
-- [ ] 已查询相关历史任务（search_todos）
-- [ ] 已了解当前工作区（get_workspaces）
-- [ ] 新需求已创建需求任务并打标签
-- [ ] 需求已拆解为子任务
-- [ ] 技术规划已创建并关联需求
-- [ ] 技术规划子任务可测试
-- [ ] 实施任务已创建并关联规划
-- [ ] 任务状态已正确设置
-- [ ] 常规操作已标记为流水账
+### 创建任务时
+- [ ] 已查询相关历史任务
+- [ ] 标题格式：`[类型] 描述`
+- [ ] 已添加类型标签（需求/技术规划/实施/流水账）
+- [ ] 已添加分支标签（格式：`分支:xxx`）
+- [ ] 已设置 `approvalStatus: "pending"`
+- [ ] 已告知用户需要审批
 
-## 注意事项
+### 开始执行前
+- [ ] 已确认 `approvalStatus: "approved"`
 
-1. **必须打标签**：每个任务必须有且只有一个主标签
-2. **必须原子化**：需求和技术规划必须拆解为可验证的子任务
-3. **必须查背景**：每次用户请求先查询相关历史任务
-4. **必须管理状态**：任务状态必须准确反映实际进度
-5. **关联记录**：技术规划和实施任务要关联到对应的需求
-6. **及时更新**：任务状态变化时立即更新
+### 完成任务时
+- [ ] `status: "completed"`
+- [ ] `approvalStatus: "pending"`（提交验收）
+- [ ] 已更新 artifact 记录实施细节
+
+---
+
+## 禁止事项
+
+- ❌ Agent 调用 `approve_todo`
+- ❌ 跳过审批直接执行（流水账除外）
+- ❌ 假设审批通过而不查询确认
+- ❌ 创建超过 10 个子任务
+- ❌ 不查询背景就开始工作

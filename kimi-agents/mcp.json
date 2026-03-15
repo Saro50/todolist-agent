@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "KanAI": {
+      "url": "http://localhost:4001/mcp"
+    }
+  }
+}
